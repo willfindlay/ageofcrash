@@ -12,6 +12,7 @@ use std::mem;
 
 static MOUSE_BARRIER_STATE: OnceLock<Arc<Mutex<Option<MouseBarrierState>>>> = OnceLock::new();
 static KEYBOARD_CALLBACK: OnceLock<Arc<Mutex<Option<Box<dyn Fn(u32, bool) + Send + Sync>>>>> = OnceLock::new();
+static MOUSE_POSITION_CALLBACK: OnceLock<Arc<Mutex<Option<Box<dyn Fn(i32, i32) + Send + Sync>>>>> = OnceLock::new();
 static KEYBOARD_HOOK_HANDLE: AtomicPtr<winapi::shared::windef::HHOOK__> = AtomicPtr::new(std::ptr::null_mut());
 static MOUSE_HOOK_HANDLE: AtomicPtr<winapi::shared::windef::HHOOK__> = AtomicPtr::new(std::ptr::null_mut());
 static LAST_IN_BARRIER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -268,14 +269,34 @@ impl Drop for KeyboardHook {
     }
 }
 
+pub fn set_mouse_position_callback<F>(callback: F) 
+where 
+    F: Fn(i32, i32) + Send + Sync + 'static 
+{
+    let callback_lock = MOUSE_POSITION_CALLBACK.get_or_init(|| Arc::new(Mutex::new(None)));
+    if let Ok(mut guard) = callback_lock.lock() {
+        *guard = Some(Box::new(callback));
+    }
+}
+
 unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code >= 0 && wparam == WM_MOUSEMOVE as WPARAM {
+        let mouse_data = *(lparam as *const MSLLHOOKSTRUCT);
+        let current_pos = mouse_data.pt;
+        
+        // Update HUD with current mouse position
+        if let Some(callback_lock) = MOUSE_POSITION_CALLBACK.get() {
+            if let Ok(callback_guard) = callback_lock.lock() {
+                if let Some(ref callback) = *callback_guard {
+                    callback(current_pos.x, current_pos.y);
+                }
+            }
+        }
+        
         if let Some(state_lock) = MOUSE_BARRIER_STATE.get() {
             if let Ok(state_guard) = state_lock.lock() {
                 if let Some(ref state) = *state_guard {
                     if state.enabled {
-                        let mouse_data = *(lparam as *const MSLLHOOKSTRUCT);
-                        let current_pos = mouse_data.pt;
                         
                         // Create buffer zone rect
                         let buffer_rect = RECT {
