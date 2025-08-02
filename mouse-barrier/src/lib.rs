@@ -216,7 +216,20 @@ unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) 
                             let new_pos = push_point_out_of_rect(&current_pos, &state.barrier_rect, state.push_factor);
                             println!("Mouse pushed from ({}, {}) to ({}, {})", 
                                 current_pos.x, current_pos.y, new_pos.x, new_pos.y);
-                            SetCursorPos(new_pos.x, new_pos.y);
+                            
+                            let result = SetCursorPos(new_pos.x, new_pos.y);
+                            if result == 0 {
+                                println!("SetCursorPos FAILED! Error: {}", GetLastError());
+                            } else {
+                                println!("SetCursorPos succeeded");
+                            }
+                            
+                            // Verify where the cursor actually ended up
+                            let mut actual_pos = POINT { x: 0, y: 0 };
+                            if GetCursorPos(&mut actual_pos) != 0 {
+                                println!("Cursor actually moved to ({}, {})", actual_pos.x, actual_pos.y);
+                            }
+                            
                             return 1;
                         }
                     }
@@ -249,31 +262,65 @@ fn point_in_rect(point: &POINT, rect: &RECT) -> bool {
 }
 
 fn push_point_out_of_rect(point: &POINT, rect: &RECT, push_factor: i32) -> POINT {
+    println!("Push logic - Mouse at ({}, {}) in rect Left:{} Top:{} Right:{} Bottom:{}", 
+             point.x, point.y, rect.left, rect.top, rect.right, rect.bottom);
+    
+    // Debug: Check what Windows thinks the screen size is
+    let screen_width = unsafe { GetSystemMetrics(SM_CXSCREEN) };
+    let screen_height = unsafe { GetSystemMetrics(SM_CYSCREEN) };
+    println!("GetSystemMetrics reports screen size: {}x{}", screen_width, screen_height);
+    
     let center_x = (rect.left + rect.right) / 2;
     let center_y = (rect.top + rect.bottom) / 2;
     
     let dx = point.x - center_x;
     let dy = point.y - center_y;
     
-    let new_x = if dx.abs() > dy.abs() {
-        if dx > 0 {
-            rect.right + push_factor
-        } else {
-            rect.left - push_factor
-        }
+    println!("Center: ({}, {}), Direction: dx={}, dy={}", center_x, center_y, dx, dy);
+    
+    // Determine which edge the mouse is closest to and push away from that edge
+    let dist_to_left = point.x - rect.left;
+    let dist_to_right = rect.right - point.x;
+    let dist_to_top = point.y - rect.top;
+    let dist_to_bottom = rect.bottom - point.y;
+    
+    println!("Distances - Left:{}, Right:{}, Top:{}, Bottom:{}", 
+             dist_to_left, dist_to_right, dist_to_top, dist_to_bottom);
+    
+    // Find the minimum distance to determine which edge to push from
+    let min_dist = dist_to_left.min(dist_to_right).min(dist_to_top).min(dist_to_bottom);
+    
+    let new_point = if min_dist == dist_to_left {
+        println!("Pushing LEFT");
+        POINT { x: rect.left - push_factor, y: point.y }
+    } else if min_dist == dist_to_right {
+        println!("Pushing RIGHT");
+        POINT { x: rect.right + push_factor, y: point.y }
+    } else if min_dist == dist_to_top {
+        println!("Pushing UP");
+        POINT { x: point.x, y: rect.top - push_factor }
     } else {
-        point.x
+        println!("Pushing DOWN");
+        POINT { x: point.x, y: rect.bottom + push_factor }
     };
     
-    let new_y = if dy.abs() > dx.abs() {
-        if dy > 0 {
-            rect.bottom + push_factor
-        } else {
-            rect.top - push_factor
-        }
-    } else {
-        point.y
-    };
+    println!("Final push destination (physical coords): ({}, {})", new_point.x, new_point.y);
+    println!("Will this be clamped? Y={} vs screen_height={}", new_point.y, screen_height);
     
-    POINT { x: new_x, y: new_y }
+    // Convert from physical coordinates to logical coordinates for SetCursorPos
+    // Physical screen: ~3840x2160, Logical screen: 3072x1728
+    let scale_x = screen_width as f64 / 3840.0;
+    let scale_y = screen_height as f64 / 2160.0;
+    
+    let logical_x = (new_point.x as f64 * scale_x).round() as i32;  
+    let logical_y = (new_point.y as f64 * scale_y).round() as i32;
+    
+    // Clamp to screen boundaries
+    let logical_x = logical_x.max(0).min(screen_width - 1);
+    let logical_y = logical_y.max(0).min(screen_height - 1);
+    
+    let logical_point = POINT { x: logical_x, y: logical_y };
+    println!("Converted to logical coords: ({}, {})", logical_point.x, logical_point.y);
+    
+    logical_point
 }
