@@ -43,6 +43,20 @@ impl HotkeyDetector {
         false
     }
 
+    pub fn update_config(&mut self, new_config: HotkeyConfig) -> Option<()> {
+        let target_vk = vk_code_from_string(&new_config.key)?;
+        
+        self.config = new_config;
+        self.target_vk = target_vk;
+        
+        // Reset modifier states to avoid confusion
+        self.ctrl_pressed = false;
+        self.alt_pressed = false;
+        self.shift_pressed = false;
+        
+        Some(())
+    }
+
     fn is_hotkey_pressed(&self) -> bool {
         self.ctrl_pressed == self.config.ctrl
             && self.alt_pressed == self.config.alt

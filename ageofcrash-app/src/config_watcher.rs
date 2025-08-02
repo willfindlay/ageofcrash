@@ -43,11 +43,6 @@ impl ConfigWatcher {
         }, rx))
     }
     
-    pub fn with_poll_interval(mut self, interval: Duration) -> Self {
-        self.poll_interval = interval;
-        self
-    }
-    
     pub fn start(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let path = self.path.clone();
         let tx = self.tx.clone();
