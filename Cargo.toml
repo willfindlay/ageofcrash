@@ -1,0 +1,18 @@
+[workspace]
+resolver = "2"
+
+members = [
+    "mouse-barrier",
+    "ageofcrash-app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["William Findlay <william ăť williamfindlay ḋőť com>"]
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+winapi = { version = "0.3", features = ["winuser", "processthreadsapi", "libloaderapi", "errhandlingapi"] }
+ron = "0.8"
+serde = { version = "1.0", features = ["derive"] }

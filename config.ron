@@ -1,0 +1,15 @@
+(
+    hotkey: (
+        ctrl: true,
+        alt: false,
+        shift: false,
+        key: "F12",
+    ),
+    barrier: (
+        x: 0,          // Left edge (x grows right)
+        y: 1080,       // Bottom edge (y is bottom of barrier)
+        width: 200,    // Width grows right from x
+        height: 40,    // Height grows up from y
+        push_factor: 50,
+    ),
+)

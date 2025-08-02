@@ -1,0 +1,16 @@
+[package]
+name = "ageofcrash-app"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "ageofcrash"
+path = "src/main.rs"
+
+[dependencies]
+mouse-barrier = { path = "../mouse-barrier" }
+ron.workspace = true
+serde.workspace = true
+winapi.workspace = true
