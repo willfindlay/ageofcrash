@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 pub struct Config {
     pub hotkey: HotkeyConfig,
     pub barrier: BarrierConfig,
+    pub hud: HudConfig,
     pub debug: bool,
 }
 
@@ -34,6 +35,24 @@ pub struct OverlayColor {
     pub b: u8,  // Blue component (0-255)
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HudConfig {
+    pub enabled: bool,
+    pub position: HudPosition,
+    pub font_size: i32,
+    pub background_color: OverlayColor,
+    pub background_alpha: u8,
+    pub text_color: OverlayColor,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum HudPosition {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -56,6 +75,22 @@ impl Default for Config {
                     b: 0,      // Blue
                 },
                 overlay_alpha: 200,  // Semi-transparent red
+            },
+            hud: HudConfig {
+                enabled: true,
+                position: HudPosition::TopRight,
+                font_size: 12,
+                background_color: OverlayColor {
+                    r: 0,      // Black background
+                    g: 0,
+                    b: 0,
+                },
+                background_alpha: 180,  // Semi-transparent
+                text_color: OverlayColor {
+                    r: 255,    // White text
+                    g: 255,
+                    b: 255,
+                },
             },
             debug: false,
         }

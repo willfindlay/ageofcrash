@@ -1,10 +1,12 @@
 mod config;
 mod config_watcher;
 mod hotkey;
+mod hud;
 
 use config::Config;
 use config_watcher::{ConfigWatcher, ConfigEvent};
 use hotkey::HotkeyDetector;
+use hud::Hud;
 use mouse_barrier::{MouseBarrier, KeyboardHook};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{self, Sender, Receiver};
@@ -22,6 +24,7 @@ struct AppState {
     barrier_enabled: bool,
     mouse_barrier: Option<MouseBarrier>,
     keyboard_hook: Option<KeyboardHook>,
+    hud: Option<Hud>,
     startup_time: std::time::Instant,
 }
 
@@ -32,6 +35,7 @@ impl AppState {
             barrier_enabled: false,
             mouse_barrier: None,
             keyboard_hook: None,
+            hud: None,
             startup_time: std::time::Instant::now(),
         }
     }
@@ -55,6 +59,24 @@ impl AppState {
         }
         
         Ok(())
+    }
+
+    fn initialize_hud(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.hud = Some(Hud::new(self.config.hud.clone())?);
+        self.update_hud_state();
+        Ok(())
+    }
+
+    fn update_hud_state(&self) {
+        hud::update_global_hud_state(
+            self.barrier_enabled,
+            self.config.barrier.x,
+            self.config.barrier.y,
+            self.config.barrier.width,
+            self.config.barrier.height,
+            self.config.barrier.buffer_zone,
+            self.config.barrier.push_factor,
+        );
     }
 
     fn cleanup_hooks(&mut self) {
@@ -111,8 +133,18 @@ impl AppState {
             }
         }
         
+        // Update HUD if configuration changed
+        if let Some(hud) = &mut self.hud {
+            if let Err(e) = hud.update_config(new_config.hud.clone()) {
+                warn!("Failed to update HUD configuration: {}", e);
+            }
+        }
+        
         // Update config
         self.config = new_config;
+        
+        // Update HUD state with new barrier configuration
+        self.update_hud_state();
         
         info!("Configuration reloaded successfully");
         log_config(&self.config);
@@ -123,6 +155,25 @@ impl AppState {
     fn toggle_barrier(&mut self) -> Result<bool, Box<dyn std::error::Error>> {
         if let Some(barrier) = &mut self.mouse_barrier {
             self.barrier_enabled = barrier.toggle()?;
+            
+            // Update HUD with new barrier state
+            self.update_hud_state();
+            
+            // Force HUD refresh
+            if let Some(hud) = &mut self.hud {
+                if let Err(e) = hud.update_barrier_state(
+                    self.barrier_enabled,
+                    self.config.barrier.x,
+                    self.config.barrier.y,
+                    self.config.barrier.width,
+                    self.config.barrier.height,
+                    self.config.barrier.buffer_zone,
+                    self.config.barrier.push_factor,
+                ) {
+                    warn!("Failed to update HUD barrier state: {}", e);
+                }
+            }
+            
             Ok(self.barrier_enabled)
         } else {
             Err("Mouse barrier not initialized".into())
@@ -172,6 +223,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create app state
     let mut state = AppState::new(config.clone());
     state.initialize_barrier()?;
+    state.initialize_hud()?;
 
     // Create event channel for hotkey and config events
     let (tx, rx): (Sender<AppEvent>, Receiver<AppEvent>) = mpsc::channel();
