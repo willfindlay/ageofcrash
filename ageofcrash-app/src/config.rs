@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 pub struct Config {
     pub hotkey: HotkeyConfig,
     pub barrier: BarrierConfig,
+    pub debug: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,6 +40,7 @@ impl Default for Config {
                 height: 40,
                 push_factor: 50,
             },
+            debug: false,
         }
     }
 }
