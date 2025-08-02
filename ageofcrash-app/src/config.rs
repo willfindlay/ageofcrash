@@ -21,6 +21,7 @@ pub struct BarrierConfig {
     pub y: i32,
     pub width: i32,
     pub height: i32,
+    pub buffer_zone: i32,
     pub push_factor: i32,
 }
 
@@ -38,6 +39,7 @@ impl Default for Config {
                 y: 1080,       // Bottom edge of screen for 1080p
                 width: 200,
                 height: 40,
+                buffer_zone: 20,
                 push_factor: 50,
             },
             debug: false,
