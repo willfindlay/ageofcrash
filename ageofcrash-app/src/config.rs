@@ -48,6 +48,12 @@ impl Default for Config {
 }
 
 impl Config {
+    pub fn load_from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, Box<dyn std::error::Error>> {
+        let content = std::fs::read_to_string(path)?;
+        let config: Config = ron::from_str(&content)?;
+        Ok(config)
+    }
+    
     pub fn load_or_create(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
         match std::fs::read_to_string(path) {
             Ok(content) => {

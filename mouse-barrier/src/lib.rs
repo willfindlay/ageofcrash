@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex, OnceLock};
-use std::sync::atomic::{AtomicPtr, Ordering};
-use tracing::{debug, info, warn};
+use std::sync::atomic::{AtomicPtr, Ordering, AtomicI32};
+use tracing::{info, warn};
 use winapi::um::winuser::*;
 use winapi::um::libloaderapi::GetModuleHandleW;
 use winapi::shared::windef::{POINT, RECT, HWND};
@@ -21,6 +21,10 @@ static OVERLAY_WINDOWS: [AtomicPtr<winapi::shared::windef::HWND__>; 4] = [
     AtomicPtr::new(std::ptr::null_mut()),
     AtomicPtr::new(std::ptr::null_mut()),
 ];
+
+// Cached screen metrics to avoid repeated API calls
+static SCREEN_WIDTH: AtomicI32 = AtomicI32::new(0);
+static SCREEN_HEIGHT: AtomicI32 = AtomicI32::new(0);
 
 #[derive(Clone)]
 struct MouseBarrierState {
@@ -53,6 +57,14 @@ impl MouseBarrier {
 
         let state_lock = MOUSE_BARRIER_STATE.get_or_init(|| Arc::new(Mutex::new(None)));
         *state_lock.lock().unwrap() = Some(state);
+
+        // Cache screen metrics on first initialization
+        unsafe {
+            let width = GetSystemMetrics(SM_CXSCREEN);
+            let height = GetSystemMetrics(SM_CYSCREEN);
+            SCREEN_WIDTH.store(width, Ordering::Relaxed);
+            SCREEN_HEIGHT.store(height, Ordering::Relaxed);
+        }
 
         Self
     }
@@ -261,37 +273,14 @@ unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) 
                         let in_buffer = point_in_rect(&current_pos, &buffer_rect);
                         let was_in_buffer = LAST_IN_BARRIER.load(Ordering::Acquire);
                         
-                        if in_buffer && !was_in_buffer {
-                            debug!(x = current_pos.x, y = current_pos.y, "Mouse entered buffer zone");
-                            LAST_IN_BARRIER.store(true, Ordering::Release);
-                        } else if !in_buffer && was_in_buffer {
-                            debug!("Mouse exited buffer zone");
-                            LAST_IN_BARRIER.store(false, Ordering::Release);
+                        if in_buffer != was_in_buffer {
+                            LAST_IN_BARRIER.store(in_buffer, Ordering::Release);
                         }
                         
                         if in_buffer {
                             let new_pos = push_point_out_of_rect(&current_pos, &buffer_rect, state.push_factor);
-                            debug!(
-                                from.x = current_pos.x, from.y = current_pos.y,
-                                to.x = new_pos.x, to.y = new_pos.y,
-                                "Mouse position pushed"
-                            );
                             
-                            let result = SetCursorPos(new_pos.x, new_pos.y);
-                            if result == 0 {
-                                warn!(error = GetLastError(), "SetCursorPos failed");
-                            } else {
-                                debug!("SetCursorPos succeeded");
-                            }
-                            
-                            // Verify where the cursor actually ended up
-                            let mut actual_pos = POINT { x: 0, y: 0 };
-                            if GetCursorPos(&mut actual_pos) != 0 {
-                                debug!(
-                                    actual.x = actual_pos.x, actual.y = actual_pos.y,
-                                    "Cursor actual position after push"
-                                );
-                            }
+                            SetCursorPos(new_pos.x, new_pos.y);
                             
                             return 1;
                         }
@@ -325,28 +314,9 @@ fn point_in_rect(point: &POINT, rect: &RECT) -> bool {
 }
 
 fn push_point_out_of_rect(point: &POINT, rect: &RECT, push_factor: i32) -> POINT {
-    debug!(
-        mouse.x = point.x, mouse.y = point.y,
-        rect.left = rect.left, rect.top = rect.top, rect.right = rect.right, rect.bottom = rect.bottom,
-        "Push logic - analyzing mouse position in barrier"
-    );
-    
-    // Debug: Check what Windows thinks the screen size is
-    let screen_width = unsafe { GetSystemMetrics(SM_CXSCREEN) };
-    let screen_height = unsafe { GetSystemMetrics(SM_CYSCREEN) };
-    debug!(width = screen_width, height = screen_height, "Screen dimensions from GetSystemMetrics");
-    
-    let center_x = (rect.left + rect.right) / 2;
-    let center_y = (rect.top + rect.bottom) / 2;
-    
-    let dx = point.x - center_x;
-    let dy = point.y - center_y;
-    
-    debug!(
-        center.x = center_x, center.y = center_y,
-        direction.dx = dx, direction.dy = dy,
-        "Barrier center and direction calculation"
-    );
+    // Use cached screen metrics
+    let screen_width = SCREEN_WIDTH.load(Ordering::Relaxed);
+    let screen_height = SCREEN_HEIGHT.load(Ordering::Relaxed);
     
     // Determine which edge the mouse is closest to and push away from that edge
     let dist_to_left = point.x - rect.left;
@@ -354,34 +324,21 @@ fn push_point_out_of_rect(point: &POINT, rect: &RECT, push_factor: i32) -> POINT
     let dist_to_top = point.y - rect.top;
     let dist_to_bottom = rect.bottom - point.y;
     
-    debug!(
-        distances.left = dist_to_left, distances.right = dist_to_right,
-        distances.top = dist_to_top, distances.bottom = dist_to_bottom,
-        "Distance to each barrier edge"
-    );
-    
     // Find the minimum distance to determine which edge to push from
     let min_dist = dist_to_left.min(dist_to_right).min(dist_to_top).min(dist_to_bottom);
     
-    let (new_point, direction) = if min_dist == dist_to_left {
-        (POINT { x: rect.left - push_factor, y: point.y }, "LEFT")
+    let new_point = if min_dist == dist_to_left {
+        POINT { x: rect.left - push_factor, y: point.y }
     } else if min_dist == dist_to_right {
-        (POINT { x: rect.right + push_factor, y: point.y }, "RIGHT")
+        POINT { x: rect.right + push_factor, y: point.y }
     } else if min_dist == dist_to_top {
-        (POINT { x: point.x, y: rect.top - push_factor }, "UP")
+        POINT { x: point.x, y: rect.top - push_factor }
     } else {
-        (POINT { x: point.x, y: rect.bottom + push_factor }, "DOWN")
+        POINT { x: point.x, y: rect.bottom + push_factor }
     };
     
-    debug!(
-        direction = direction,
-        physical.x = new_point.x, physical.y = new_point.y,
-        will_clamp = new_point.y > screen_height,
-        "Push direction determined"
-    );
-    
     // Convert from physical coordinates to logical coordinates for SetCursorPos
-    // Physical screen: ~3840x2160, Logical screen: 3072x1728
+    // Physical screen: ~3840x2160, Logical screen: varies
     let scale_x = screen_width as f64 / 3840.0;
     let scale_y = screen_height as f64 / 2160.0;
     
@@ -392,14 +349,7 @@ fn push_point_out_of_rect(point: &POINT, rect: &RECT, push_factor: i32) -> POINT
     let logical_x = logical_x.max(0).min(screen_width - 1);
     let logical_y = logical_y.max(0).min(screen_height - 1);
     
-    let logical_point = POINT { x: logical_x, y: logical_y };
-    debug!(
-        logical.x = logical_point.x, logical.y = logical_point.y,
-        scale.x = scale_x, scale.y = scale_y,
-        "Converted to logical coordinates"
-    );
-    
-    logical_point
+    POINT { x: logical_x, y: logical_y }
 }
 
 unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
