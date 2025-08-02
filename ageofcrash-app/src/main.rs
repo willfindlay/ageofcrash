@@ -30,6 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         barrier.height = config.barrier.height,
         barrier.x = config.barrier.x,
         barrier.y = config.barrier.y,
+        barrier.buffer_zone = config.barrier.buffer_zone,
         "Barrier area configured"
     );
     info!(push_factor = config.barrier.push_factor, "Push factor configured");
@@ -48,6 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.barrier.y,
         config.barrier.width,
         config.barrier.height,
+        config.barrier.buffer_zone,
         config.barrier.push_factor,
     );
 

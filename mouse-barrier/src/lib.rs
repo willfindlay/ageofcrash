@@ -3,19 +3,30 @@ use std::sync::atomic::{AtomicPtr, Ordering};
 use tracing::{debug, info, warn};
 use winapi::um::winuser::*;
 use winapi::um::libloaderapi::GetModuleHandleW;
-use winapi::shared::windef::{POINT, RECT};
-use winapi::shared::minwindef::{WPARAM, LPARAM, LRESULT};
+use winapi::shared::windef::{POINT, RECT, HWND};
+use winapi::shared::minwindef::{WPARAM, LPARAM, LRESULT, UINT, TRUE};
 use winapi::um::errhandlingapi::GetLastError;
+use winapi::um::wingdi::*;
+use winapi::shared::windef::{SIZE};
+use std::ptr;
+use std::mem;
 
 static MOUSE_BARRIER_STATE: OnceLock<Arc<Mutex<Option<MouseBarrierState>>>> = OnceLock::new();
 static KEYBOARD_CALLBACK: OnceLock<Arc<Mutex<Option<Box<dyn Fn(u32, bool) + Send + Sync>>>>> = OnceLock::new();
 static KEYBOARD_HOOK_HANDLE: AtomicPtr<winapi::shared::windef::HHOOK__> = AtomicPtr::new(std::ptr::null_mut());
 static MOUSE_HOOK_HANDLE: AtomicPtr<winapi::shared::windef::HHOOK__> = AtomicPtr::new(std::ptr::null_mut());
 static LAST_IN_BARRIER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static OVERLAY_WINDOWS: [AtomicPtr<winapi::shared::windef::HWND__>; 4] = [
+    AtomicPtr::new(std::ptr::null_mut()),
+    AtomicPtr::new(std::ptr::null_mut()),
+    AtomicPtr::new(std::ptr::null_mut()),
+    AtomicPtr::new(std::ptr::null_mut()),
+];
 
 #[derive(Clone)]
 struct MouseBarrierState {
     barrier_rect: RECT,
+    buffer_zone: i32,
     push_factor: i32,
     enabled: bool,
 }
@@ -25,7 +36,7 @@ pub struct MouseBarrier;
 pub struct KeyboardHook;
 
 impl MouseBarrier {
-    pub fn new(x: i32, y: i32, width: i32, height: i32, push_factor: i32) -> Self {
+    pub fn new(x: i32, y: i32, width: i32, height: i32, buffer_zone: i32, push_factor: i32) -> Self {
         // Convert from bottom-left origin to Windows top-left origin
         let barrier_rect = RECT {
             left: x,
@@ -36,6 +47,7 @@ impl MouseBarrier {
 
         let state = MouseBarrierState {
             barrier_rect,
+            buffer_zone,
             push_factor,
             enabled: false,
         };
@@ -55,6 +67,21 @@ impl MouseBarrier {
         let state_lock = MOUSE_BARRIER_STATE.get().unwrap();
         if let Some(ref mut state) = *state_lock.lock().unwrap() {
             state.enabled = true;
+        }
+        
+        // Create overlay windows (4 rectangles)
+        match create_overlay_windows() {
+            Ok(windows) => {
+                for (i, hwnd) in windows.into_iter().enumerate() {
+                    if i < 4 {
+                        OVERLAY_WINDOWS[i].store(hwnd, Ordering::Release);
+                    }
+                }
+                info!("Created overlay windows");
+            }
+            Err(e) => {
+                warn!("Failed to create overlay windows: {}", e);
+            }
         }
         
         unsafe {
@@ -90,6 +117,17 @@ impl MouseBarrier {
                 }
             }
         }
+        
+        // Destroy overlay windows
+        for atomic_ptr in &OVERLAY_WINDOWS {
+            let hwnd = atomic_ptr.swap(ptr::null_mut(), Ordering::AcqRel);
+            if !hwnd.is_null() {
+                unsafe {
+                    DestroyWindow(hwnd);
+                }
+            }
+        }
+        info!("Destroyed overlay windows");
 
         Ok(())
     }
@@ -114,7 +152,7 @@ impl MouseBarrier {
         }
     }
 
-    pub fn update_barrier(&mut self, x: i32, y: i32, width: i32, height: i32, push_factor: i32) {
+    pub fn update_barrier(&mut self, x: i32, y: i32, width: i32, height: i32, buffer_zone: i32, push_factor: i32) {
         let state_lock = MOUSE_BARRIER_STATE.get().unwrap();
         if let Some(ref mut state) = *state_lock.lock().unwrap() {
             // Convert from bottom-left origin to Windows top-left origin
@@ -124,7 +162,18 @@ impl MouseBarrier {
                 right: x + width,   // right extends from left
                 bottom: y,          // bottom is the y coordinate
             };
+            state.buffer_zone = buffer_zone;
             state.push_factor = push_factor;
+        }
+        
+        // Update the overlay windows if they exist
+        for atomic_ptr in &OVERLAY_WINDOWS {
+            let hwnd = atomic_ptr.load(Ordering::Acquire);
+            if !hwnd.is_null() {
+                unsafe {
+                    InvalidateRect(hwnd, ptr::null(), TRUE);
+                }
+            }
         }
     }
 }
@@ -202,19 +251,27 @@ unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) 
                         let mouse_data = *(lparam as *const MSLLHOOKSTRUCT);
                         let current_pos = mouse_data.pt;
                         
-                        let in_barrier = point_in_rect(&current_pos, &state.barrier_rect);
-                        let was_in_barrier = LAST_IN_BARRIER.load(Ordering::Acquire);
+                        // Create buffer zone rect
+                        let buffer_rect = RECT {
+                            left: state.barrier_rect.left - state.buffer_zone,
+                            top: state.barrier_rect.top - state.buffer_zone,
+                            right: state.barrier_rect.right + state.buffer_zone,
+                            bottom: state.barrier_rect.bottom + state.buffer_zone,
+                        };
                         
-                        if in_barrier && !was_in_barrier {
-                            debug!(x = current_pos.x, y = current_pos.y, "Mouse entered barrier zone");
+                        let in_buffer = point_in_rect(&current_pos, &buffer_rect);
+                        let was_in_buffer = LAST_IN_BARRIER.load(Ordering::Acquire);
+                        
+                        if in_buffer && !was_in_buffer {
+                            debug!(x = current_pos.x, y = current_pos.y, "Mouse entered buffer zone");
                             LAST_IN_BARRIER.store(true, Ordering::Release);
-                        } else if !in_barrier && was_in_barrier {
-                            debug!("Mouse exited barrier zone");
+                        } else if !in_buffer && was_in_buffer {
+                            debug!("Mouse exited buffer zone");
                             LAST_IN_BARRIER.store(false, Ordering::Release);
                         }
                         
-                        if in_barrier {
-                            let new_pos = push_point_out_of_rect(&current_pos, &state.barrier_rect, state.push_factor);
+                        if in_buffer {
+                            let new_pos = push_point_out_of_rect(&current_pos, &buffer_rect, state.push_factor);
                             debug!(
                                 from.x = current_pos.x, from.y = current_pos.y,
                                 to.x = new_pos.x, to.y = new_pos.y,
@@ -344,4 +401,138 @@ fn push_point_out_of_rect(point: &POINT, rect: &RECT, push_factor: i32) -> POINT
     );
     
     logical_point
+}
+
+unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    match msg {
+        WM_PAINT => {
+            let mut ps: PAINTSTRUCT = mem::zeroed();
+            let hdc = BeginPaint(hwnd, &mut ps);
+            
+            // Just draw a simple red rectangle to test if anything shows up
+            let red_brush = CreateSolidBrush(RGB(255, 0, 0));
+            let mut client_rect = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+            GetClientRect(hwnd, &mut client_rect);
+            FillRect(hdc, &client_rect, red_brush);
+            DeleteObject(red_brush as *mut _);
+            
+            EndPaint(hwnd, &ps);
+            0
+        }
+        WM_ERASEBKGND => {
+            1 // Return non-zero to indicate we handled it
+        }
+        _ => DefWindowProcW(hwnd, msg, wparam, lparam)
+    }
+}
+
+fn create_overlay_windows() -> Result<Vec<HWND>, String> {
+    let state_lock = MOUSE_BARRIER_STATE.get().unwrap();
+    let mut windows = Vec::new();
+    
+    if let Ok(state_guard) = state_lock.lock() {
+        if let Some(ref state) = *state_guard {
+            // Calculate positions for 4 windows
+            let screen_width = unsafe { GetSystemMetrics(SM_CXSCREEN) };
+            let screen_height = unsafe { GetSystemMetrics(SM_CYSCREEN) };
+            let scale_x = screen_width as f64 / 3840.0;
+            let scale_y = screen_height as f64 / 2160.0;
+            
+            let barrier_left = (state.barrier_rect.left as f64 * scale_x).round() as i32;
+            let barrier_top = (state.barrier_rect.top as f64 * scale_y).round() as i32;
+            let barrier_right = (state.barrier_rect.right as f64 * scale_x).round() as i32;
+            let barrier_bottom = (state.barrier_rect.bottom as f64 * scale_y).round() as i32;
+            
+            let scaled_buffer = (state.buffer_zone as f64 * scale_x).round() as i32;
+            let buffer_left = barrier_left - scaled_buffer;
+            let buffer_top = barrier_top - scaled_buffer;
+            let buffer_right = barrier_right + scaled_buffer;
+            let buffer_bottom = barrier_bottom + scaled_buffer;
+            
+            // Create 4 windows - top, bottom, left, right
+            // Clamp to screen boundaries to avoid covering taskbar
+            let max_bottom = screen_height - 60; // Leave space for taskbar
+            let clamped_buffer_bottom = buffer_bottom.min(max_bottom);
+            let clamped_buffer_top = buffer_top.max(0);
+            let clamped_buffer_left = buffer_left.max(0);
+            let clamped_buffer_right = buffer_right.min(screen_width);
+            
+            let window_configs = [
+                ("top", clamped_buffer_left, clamped_buffer_top, clamped_buffer_right - clamped_buffer_left, barrier_top - clamped_buffer_top),
+                ("bottom", clamped_buffer_left, barrier_bottom, clamped_buffer_right - clamped_buffer_left, clamped_buffer_bottom - barrier_bottom),
+                ("left", clamped_buffer_left, barrier_top, barrier_left - clamped_buffer_left, barrier_bottom - barrier_top),
+                ("right", barrier_right, barrier_top, clamped_buffer_right - barrier_right, barrier_bottom - barrier_top),
+            ];
+            
+            for (name, x, y, width, height) in window_configs.iter() {
+                if *width > 0 && *height > 0 {
+                    match create_single_overlay_window(*x, *y, *width, *height) {
+                        Ok(hwnd) => windows.push(hwnd),
+                        Err(e) => return Err(format!("Failed to create {} window: {}", name, e)),
+                    }
+                }
+            }
+        }
+    }
+    
+    Ok(windows)
+}
+
+fn create_single_overlay_window(x: i32, y: i32, width: i32, height: i32) -> Result<HWND, String> {
+    unsafe {
+        let instance = GetModuleHandleW(ptr::null());
+        let class_name: Vec<u16> = "MouseBarrierOverlay\0".encode_utf16().collect();
+        
+        // Check if class is already registered
+        let mut wc_existing: WNDCLASSEXW = mem::zeroed();
+        wc_existing.cbSize = mem::size_of::<WNDCLASSEXW>() as u32;
+        
+        if GetClassInfoExW(instance, class_name.as_ptr(), &mut wc_existing) == 0 {
+            // Class not registered, so register it
+            let wc = WNDCLASSEXW {
+                cbSize: mem::size_of::<WNDCLASSEXW>() as u32,
+                style: CS_HREDRAW | CS_VREDRAW,
+                lpfnWndProc: Some(window_proc),
+                cbClsExtra: 0,
+                cbWndExtra: 0,
+                hInstance: instance,
+                hIcon: ptr::null_mut(),
+                hCursor: ptr::null_mut(),
+                hbrBackground: ptr::null_mut(), // No background brush
+                lpszMenuName: ptr::null(),
+                lpszClassName: class_name.as_ptr(),
+                hIconSm: ptr::null_mut(),
+            };
+            
+            if RegisterClassExW(&wc) == 0 {
+                return Err(format!("Failed to register window class: {}", GetLastError()));
+            }
+        }
+        
+        // Use the provided window dimensions
+        
+        let hwnd = CreateWindowExW(
+            WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+            class_name.as_ptr(),
+            class_name.as_ptr(),
+            WS_POPUP,
+            x, y, width, height,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            instance,
+            ptr::null_mut(),
+        );
+        
+        if hwnd.is_null() {
+            return Err(format!("Failed to create window: {}", GetLastError()));
+        }
+        
+        // Use simple alpha transparency - make it very visible for debugging
+        SetLayeredWindowAttributes(hwnd, 0, 230, LWA_ALPHA);
+        
+        ShowWindow(hwnd, SW_SHOW);
+        UpdateWindow(hwnd);
+        
+        Ok(hwnd)
+    }
 }
