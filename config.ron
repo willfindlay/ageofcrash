@@ -1,15 +1,30 @@
 (
+    // Hotkey configuration - combination to toggle the mouse barrier
     hotkey: (
-        ctrl: true,
-        alt: false,
-        shift: false,
-        key: "F12",
+        ctrl: true,       // Hold Ctrl key
+        alt: false,       // Hold Alt key (optional)
+        shift: false,     // Hold Shift key (optional)
+        key: "F12",       // Key to press (F1-F12, A-Z, 0-9)
     ),
+    
+    // Mouse barrier configuration
     barrier: (
-        x: 0,          // Left edge (x grows right)
-        y: 1080,       // Bottom edge (y is bottom of barrier)
-        width: 200,    // Width grows right from x
-        height: 40,    // Height grows up from y
-        push_factor: 50,
+        x: 0,             // Left edge of barrier (pixels from left screen edge)
+        y: 1080,          // Bottom edge of barrier (pixels from bottom screen edge)
+        width: 200,       // Width of barrier extending right from x
+        height: 40,       // Height of barrier extending up from y
+        buffer_zone: 20,  // Extra detection area around barrier (pixels)
+        push_factor: 50,  // How far to push cursor away from barrier (pixels)
+        
+        // Visual overlay settings (only visible when barrier is enabled)
+        overlay_color: (
+            r: 255,       // Red component (0-255, where 255 is full red)
+            g: 0,         // Green component (0-255, where 255 is full green)
+            b: 0,         // Blue component (0-255, where 255 is full blue)
+        ),
+        overlay_alpha: 200,  // Transparency (0=invisible, 255=fully opaque)
     ),
+    
+    // Debug mode - enables detailed logging
+    debug: false,         // Set to true for verbose debug output
 )

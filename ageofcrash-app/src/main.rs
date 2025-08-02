@@ -44,6 +44,8 @@ impl AppState {
             self.config.barrier.height,
             self.config.barrier.buffer_zone,
             self.config.barrier.push_factor,
+            (self.config.barrier.overlay_color.r, self.config.barrier.overlay_color.g, self.config.barrier.overlay_color.b),
+            self.config.barrier.overlay_alpha,
         ));
         
         if self.barrier_enabled {
@@ -88,6 +90,8 @@ impl AppState {
                 new_config.barrier.height,
                 new_config.barrier.buffer_zone,
                 new_config.barrier.push_factor,
+                (new_config.barrier.overlay_color.r, new_config.barrier.overlay_color.g, new_config.barrier.overlay_color.b),
+                new_config.barrier.overlay_alpha,
             );
             
             // If barrier was enabled, toggle it off and back on to refresh overlay windows

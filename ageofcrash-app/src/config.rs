@@ -23,6 +23,15 @@ pub struct BarrierConfig {
     pub height: i32,
     pub buffer_zone: i32,
     pub push_factor: i32,
+    pub overlay_color: OverlayColor,
+    pub overlay_alpha: u8,  // 0-255, where 255 is opaque, 0 is transparent
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OverlayColor {
+    pub r: u8,  // Red component (0-255)
+    pub g: u8,  // Green component (0-255) 
+    pub b: u8,  // Blue component (0-255)
 }
 
 impl Default for Config {
@@ -41,6 +50,12 @@ impl Default for Config {
                 height: 40,
                 buffer_zone: 20,
                 push_factor: 50,
+                overlay_color: OverlayColor {
+                    r: 255,    // Red
+                    g: 0,      // Green
+                    b: 0,      // Blue
+                },
+                overlay_alpha: 200,  // Semi-transparent red
             },
             debug: false,
         }

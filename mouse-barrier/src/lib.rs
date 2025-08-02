@@ -26,12 +26,17 @@ static OVERLAY_WINDOWS: [AtomicPtr<winapi::shared::windef::HWND__>; 4] = [
 static SCREEN_WIDTH: AtomicI32 = AtomicI32::new(0);
 static SCREEN_HEIGHT: AtomicI32 = AtomicI32::new(0);
 
+// Current overlay color for window painting
+static CURRENT_OVERLAY_COLOR: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x00FF0000); // Default red
+
 #[derive(Clone)]
 struct MouseBarrierState {
     barrier_rect: RECT,
     buffer_zone: i32,
     push_factor: i32,
     enabled: bool,
+    overlay_color: u32,  // RGB color as 0x00RRGGBB
+    overlay_alpha: u8,   // Alpha transparency (0-255)
 }
 
 pub struct MouseBarrier;
@@ -39,7 +44,7 @@ pub struct MouseBarrier;
 pub struct KeyboardHook;
 
 impl MouseBarrier {
-    pub fn new(x: i32, y: i32, width: i32, height: i32, buffer_zone: i32, push_factor: i32) -> Self {
+    pub fn new(x: i32, y: i32, width: i32, height: i32, buffer_zone: i32, push_factor: i32, overlay_color: (u8, u8, u8), overlay_alpha: u8) -> Self {
         // Convert from bottom-left origin to Windows top-left origin
         let barrier_rect = RECT {
             left: x,
@@ -53,10 +58,12 @@ impl MouseBarrier {
             buffer_zone,
             push_factor,
             enabled: false,
+            overlay_color: ((overlay_color.0 as u32) << 16) | ((overlay_color.1 as u32) << 8) | (overlay_color.2 as u32),
+            overlay_alpha,
         };
 
         let state_lock = MOUSE_BARRIER_STATE.get_or_init(|| Arc::new(Mutex::new(None)));
-        *state_lock.lock().unwrap() = Some(state);
+        *state_lock.lock().unwrap() = Some(state.clone());
 
         // Cache screen metrics on first initialization
         unsafe {
@@ -65,6 +72,9 @@ impl MouseBarrier {
             SCREEN_WIDTH.store(width, Ordering::Relaxed);
             SCREEN_HEIGHT.store(height, Ordering::Relaxed);
         }
+
+        // Update the global overlay color
+        CURRENT_OVERLAY_COLOR.store(state.overlay_color, Ordering::Relaxed);
 
         Self
     }
@@ -163,7 +173,7 @@ impl MouseBarrier {
         }
     }
 
-    pub fn update_barrier(&mut self, x: i32, y: i32, width: i32, height: i32, buffer_zone: i32, push_factor: i32) {
+    pub fn update_barrier(&mut self, x: i32, y: i32, width: i32, height: i32, buffer_zone: i32, push_factor: i32, overlay_color: (u8, u8, u8), overlay_alpha: u8) {
         let state_lock = MOUSE_BARRIER_STATE.get().unwrap();
         if let Some(ref mut state) = *state_lock.lock().unwrap() {
             // Convert from bottom-left origin to Windows top-left origin
@@ -175,6 +185,11 @@ impl MouseBarrier {
             };
             state.buffer_zone = buffer_zone;
             state.push_factor = push_factor;
+            state.overlay_color = ((overlay_color.0 as u32) << 16) | ((overlay_color.1 as u32) << 8) | (overlay_color.2 as u32);
+            state.overlay_alpha = overlay_alpha;
+            
+            // Update the global overlay color
+            CURRENT_OVERLAY_COLOR.store(state.overlay_color, Ordering::Relaxed);
         }
         
         // Update the overlay windows if they exist
@@ -358,12 +373,17 @@ unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lpa
             let mut ps: PAINTSTRUCT = mem::zeroed();
             let hdc = BeginPaint(hwnd, &mut ps);
             
-            // Just draw a simple red rectangle to test if anything shows up
-            let red_brush = CreateSolidBrush(RGB(255, 0, 0));
+            // Draw overlay rectangle with configured color
+            let color = CURRENT_OVERLAY_COLOR.load(Ordering::Relaxed);
+            let r = ((color >> 16) & 0xFF) as u8;
+            let g = ((color >> 8) & 0xFF) as u8;
+            let b = (color & 0xFF) as u8;
+            
+            let brush = CreateSolidBrush(RGB(r, g, b));
             let mut client_rect = RECT { left: 0, top: 0, right: 0, bottom: 0 };
             GetClientRect(hwnd, &mut client_rect);
-            FillRect(hdc, &client_rect, red_brush);
-            DeleteObject(red_brush as *mut _);
+            FillRect(hdc, &client_rect, brush);
+            DeleteObject(brush as *mut _);
             
             EndPaint(hwnd, &ps);
             0
@@ -415,7 +435,7 @@ fn create_overlay_windows() -> Result<Vec<HWND>, String> {
             
             for (name, x, y, width, height) in window_configs.iter() {
                 if *width > 0 && *height > 0 {
-                    match create_single_overlay_window(*x, *y, *width, *height) {
+                    match create_single_overlay_window(*x, *y, *width, *height, state.overlay_color, state.overlay_alpha) {
                         Ok(hwnd) => windows.push(hwnd),
                         Err(e) => return Err(format!("Failed to create {} window: {}", name, e)),
                     }
@@ -427,7 +447,7 @@ fn create_overlay_windows() -> Result<Vec<HWND>, String> {
     Ok(windows)
 }
 
-fn create_single_overlay_window(x: i32, y: i32, width: i32, height: i32) -> Result<HWND, String> {
+fn create_single_overlay_window(x: i32, y: i32, width: i32, height: i32, _color: u32, alpha: u8) -> Result<HWND, String> {
     unsafe {
         let instance = GetModuleHandleW(ptr::null());
         let class_name: Vec<u16> = "MouseBarrierOverlay\0".encode_utf16().collect();
@@ -476,8 +496,8 @@ fn create_single_overlay_window(x: i32, y: i32, width: i32, height: i32) -> Resu
             return Err(format!("Failed to create window: {}", GetLastError()));
         }
         
-        // Use simple alpha transparency - make it very visible for debugging
-        SetLayeredWindowAttributes(hwnd, 0, 230, LWA_ALPHA);
+        // Use configurable alpha transparency
+        SetLayeredWindowAttributes(hwnd, 0, alpha, LWA_ALPHA);
         
         ShowWindow(hwnd, SW_SHOW);
         UpdateWindow(hwnd);
