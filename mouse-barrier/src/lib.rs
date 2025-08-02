@@ -7,7 +7,6 @@ use winapi::shared::windef::{POINT, RECT, HWND};
 use winapi::shared::minwindef::{WPARAM, LPARAM, LRESULT, UINT, TRUE};
 use winapi::um::errhandlingapi::GetLastError;
 use winapi::um::wingdi::*;
-use winapi::shared::windef::{SIZE};
 use std::ptr;
 use std::mem;
 
