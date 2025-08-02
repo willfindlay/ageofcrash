@@ -412,6 +412,23 @@ unsafe fn draw_hud_content(hdc: HDC, rect: &RECT) {
         push_wide.as_ptr(),
         push_wide.len() as i32 - 1,
     );
+    y_pos += line_height;
+
+    // Mouse position in yellow
+    let mouse_text = format!("Mouse: ({}, {})", state.mouse_x, state.mouse_y);
+    let mouse_wide: Vec<u16> = OsStr::new(&mouse_text)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    SetTextColor(hdc, RGB(255, 255, 100)); // Yellow color
+    TextOutW(
+        hdc,
+        rect.left + 10,
+        y_pos,
+        mouse_wide.as_ptr(),
+        mouse_wide.len() as i32 - 1,
+    );
 }
 
 // Global HUD state for access from window procedure
@@ -426,6 +443,8 @@ pub struct HudState {
     pub height: i32,
     pub buffer_zone: i32,
     pub push_factor: i32,
+    pub mouse_x: i32,
+    pub mouse_y: i32,
 }
 
 lazy_static::lazy_static! {
@@ -437,6 +456,8 @@ lazy_static::lazy_static! {
         height: 0,
         buffer_zone: 0,
         push_factor: 0,
+        mouse_x: 0,
+        mouse_y: 0,
     }));
 }
 
@@ -457,5 +478,30 @@ pub fn update_global_hud_state(
         state.height = height;
         state.buffer_zone = buffer_zone;
         state.push_factor = push_factor;
+    }
+}
+
+pub fn update_mouse_position(x: i32, y: i32) {
+    if let Ok(mut state) = HUD_STATE.lock() {
+        state.mouse_x = x;
+        state.mouse_y = y;
+    }
+    
+    // Find and refresh any HUD windows
+    refresh_hud_windows();
+}
+
+fn refresh_hud_windows() {
+    unsafe {
+        // Find the HUD window by class name and refresh it
+        let class_name: Vec<u16> = std::ffi::OsStr::new("AgeOfCrashHUD")
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        
+        let hwnd = FindWindowW(class_name.as_ptr(), ptr::null());
+        if !hwnd.is_null() {
+            InvalidateRect(hwnd, ptr::null(), FALSE);
+        }
     }
 }

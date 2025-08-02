@@ -7,7 +7,7 @@ use config::Config;
 use config_watcher::{ConfigWatcher, ConfigEvent};
 use hotkey::HotkeyDetector;
 use hud::Hud;
-use mouse_barrier::{MouseBarrier, KeyboardHook};
+use mouse_barrier::{MouseBarrier, KeyboardHook, set_mouse_position_callback};
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::{self, Sender, Receiver};
 use tracing::{info, warn, error, Level};
@@ -224,6 +224,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut state = AppState::new(config.clone());
     state.initialize_barrier()?;
     state.initialize_hud()?;
+    
+    // Set up mouse position callback for HUD updates
+    set_mouse_position_callback(|x, y| {
+        hud::update_mouse_position(x, y);
+    });
 
     // Create event channel for hotkey and config events
     let (tx, rx): (Sender<AppEvent>, Receiver<AppEvent>) = mpsc::channel();
