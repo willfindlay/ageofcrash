@@ -1,30 +1,123 @@
 mod config;
+mod config_watcher;
 mod hotkey;
 
 use config::Config;
+use config_watcher::{ConfigWatcher, ConfigEvent};
 use hotkey::HotkeyDetector;
 use mouse_barrier::{MouseBarrier, KeyboardHook};
 use std::sync::{Arc, Mutex};
-use tracing::{info, Level};
-use tracing_subscriber;
+use std::sync::mpsc::{self, Sender, Receiver};
+use tracing::{info, warn, error, Level};
 use winapi::um::winuser::*;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("Age of Crash Mouse Barrier v0.1.0");
-    println!("Loading configuration...");
+enum AppEvent {
+    HotkeyPressed,
+    ConfigReloaded(Config),
+    ConfigError(String),
+}
 
-    let config = Config::load_or_create("config.ron")?;
-    
-    // Initialize tracing based on debug flag
-    let level = if config.debug { Level::DEBUG } else { Level::INFO };
-    tracing_subscriber::fmt()
-        .with_max_level(level)
-        .with_target(false)
-        .with_thread_ids(false)
-        .with_file(false)
-        .with_line_number(false)
-        .init();
+struct AppState {
+    config: Config,
+    barrier_enabled: bool,
+    mouse_barrier: Option<MouseBarrier>,
+    keyboard_hook: Option<KeyboardHook>,
+    startup_time: std::time::Instant,
+}
 
+impl AppState {
+    fn new(config: Config) -> Self {
+        Self {
+            config,
+            barrier_enabled: false,
+            mouse_barrier: None,
+            keyboard_hook: None,
+            startup_time: std::time::Instant::now(),
+        }
+    }
+
+    fn initialize_barrier(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.mouse_barrier = Some(MouseBarrier::new(
+            self.config.barrier.x,
+            self.config.barrier.y,
+            self.config.barrier.width,
+            self.config.barrier.height,
+            self.config.barrier.buffer_zone,
+            self.config.barrier.push_factor,
+        ));
+        
+        if self.barrier_enabled {
+            if let Some(barrier) = &mut self.mouse_barrier {
+                barrier.enable()?;
+            }
+        }
+        
+        Ok(())
+    }
+
+    fn cleanup_hooks(&mut self) {
+        // Disable mouse barrier
+        if let Some(mut barrier) = self.mouse_barrier.take() {
+            let _ = barrier.disable();
+        }
+        
+        // Disable keyboard hook
+        if let Some(mut hook) = self.keyboard_hook.take() {
+            let _ = hook.disable();
+        }
+    }
+
+    fn reload_config(&mut self, new_config: Config) -> Result<(), Box<dyn std::error::Error>> {
+        // Skip reloads within first 2 seconds of startup to avoid deployment triggers
+        if self.startup_time.elapsed() < std::time::Duration::from_secs(2) {
+            info!("Skipping config reload during startup grace period");
+            return Ok(());
+        }
+        
+        info!("Reloading configuration...");
+        
+        // Check if barrier is currently enabled before updating
+        let was_enabled = self.barrier_enabled;
+        
+        // Update the barrier configuration using the existing global state
+        if let Some(barrier) = &mut self.mouse_barrier {
+            barrier.update_barrier(
+                new_config.barrier.x,
+                new_config.barrier.y,
+                new_config.barrier.width,
+                new_config.barrier.height,
+                new_config.barrier.buffer_zone,
+                new_config.barrier.push_factor,
+            );
+            
+            // If barrier was enabled, toggle it off and back on to refresh overlay windows
+            if was_enabled {
+                info!("Refreshing overlay windows with new barrier dimensions");
+                barrier.disable()?;
+                barrier.enable()?;
+            }
+        }
+        
+        // Update config
+        self.config = new_config;
+        
+        info!("Configuration reloaded successfully");
+        log_config(&self.config);
+        
+        Ok(())
+    }
+
+    fn toggle_barrier(&mut self) -> Result<bool, Box<dyn std::error::Error>> {
+        if let Some(barrier) = &mut self.mouse_barrier {
+            self.barrier_enabled = barrier.toggle()?;
+            Ok(self.barrier_enabled)
+        } else {
+            Err("Mouse barrier not initialized".into())
+        }
+    }
+}
+
+fn log_config(config: &Config) {
     info!(
         barrier.width = config.barrier.width,
         barrier.height = config.barrier.height,
@@ -43,50 +136,129 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Hotkey configured"
     );
     info!(debug = config.debug, "Debug mode");
+}
 
-    let mouse_barrier = MouseBarrier::new(
-        config.barrier.x,
-        config.barrier.y,
-        config.barrier.width,
-        config.barrier.height,
-        config.barrier.buffer_zone,
-        config.barrier.push_factor,
-    );
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Age of Crash Mouse Barrier v0.1.0");
+    println!("Loading configuration...");
 
-    let hotkey_detector = Arc::new(Mutex::new(
-        HotkeyDetector::new(config.hotkey)
-            .ok_or("Failed to create hotkey detector")?
-    ));
+    let config = Config::load_or_create("config.ron")?;
+    
+    // Initialize tracing based on debug flag
+    let level = if config.debug { Level::DEBUG } else { Level::INFO };
+    tracing_subscriber::fmt()
+        .with_max_level(level)
+        .with_target(false)
+        .with_thread_ids(false)
+        .with_file(false)
+        .with_line_number(false)
+        .init();
 
-    let barrier_handle = Arc::new(Mutex::new(mouse_barrier));
-    let barrier_clone = barrier_handle.clone();
+    log_config(&config);
 
-    let mut keyboard_hook = KeyboardHook::new(move |vk_code, is_down| {
-        if let Ok(mut detector) = hotkey_detector.lock() {
-            if detector.handle_key(vk_code, is_down) {
-                if let Ok(mut barrier) = barrier_clone.lock() {
-                    match barrier.toggle() {
-                        Ok(enabled) => {
-                            info!(enabled = enabled, "Mouse barrier toggled");
-                        }
-                        Err(e) => tracing::error!(error = %e, "Failed to toggle barrier"),
+    // Create app state
+    let mut state = AppState::new(config.clone());
+    state.initialize_barrier()?;
+
+    // Create event channel for hotkey and config events
+    let (tx, rx): (Sender<AppEvent>, Receiver<AppEvent>) = mpsc::channel();
+    
+    // Set up config watcher
+    let (mut config_watcher, config_rx) = ConfigWatcher::new("config.ron")?;
+    config_watcher.start()?;
+    
+    // Keep config_watcher alive
+    let _config_watcher = Arc::new(Mutex::new(config_watcher));
+    
+    // Spawn thread to forward config events to main event channel
+    let config_tx = tx.clone();
+    std::thread::spawn(move || {
+        loop {
+            match config_rx.recv() {
+                Ok(ConfigEvent::Modified(new_config)) => {
+                    if config_tx.send(AppEvent::ConfigReloaded(new_config)).is_err() {
+                        break;
                     }
                 }
+                Ok(ConfigEvent::Error(err)) => {
+                    if config_tx.send(AppEvent::ConfigError(err)).is_err() {
+                        break;
+                    }
+                }
+                Err(_) => break, // Channel closed
+            }
+        }
+    });
+
+    // Set up keyboard hook
+    let hotkey_detector = Arc::new(Mutex::new(
+        HotkeyDetector::new(config.hotkey.clone())
+            .ok_or("Failed to create hotkey detector")?
+    ));
+    
+    let hotkey_tx = tx.clone();
+    let hotkey_detector_clone = hotkey_detector.clone();
+    let mut keyboard_hook = KeyboardHook::new(move |vk_code, is_down| {
+        if let Ok(mut detector) = hotkey_detector_clone.lock() {
+            if detector.handle_key(vk_code, is_down) {
+                let _ = hotkey_tx.send(AppEvent::HotkeyPressed);
             }
         }
     });
 
     keyboard_hook.enable()?;
+    state.keyboard_hook = Some(keyboard_hook);
+    
     info!("Keyboard hook enabled. Press the hotkey to toggle the mouse barrier.");
+    info!("Config file monitoring enabled. Changes will be applied automatically.");
     info!("Press Ctrl+C to exit.");
 
+    // Windows message loop with integrated event processing
     unsafe {
-        let mut msg = std::mem::zeroed();
-        while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
-            TranslateMessage(&msg);
-            DispatchMessageW(&msg);
+        loop {
+            // Process all pending application events first
+            while let Ok(event) = rx.try_recv() {
+                match event {
+                    AppEvent::HotkeyPressed => {
+                        match state.toggle_barrier() {
+                            Ok(enabled) => {
+                                info!(enabled = enabled, "Mouse barrier toggled");
+                            }
+                            Err(e) => error!(error = %e, "Failed to toggle barrier"),
+                        }
+                    }
+                    AppEvent::ConfigReloaded(new_config) => {
+                        // Note: Hotkey changes require restart for now
+                        // TODO: Implement dynamic hotkey updates
+                        
+                        if let Err(e) = state.reload_config(new_config) {
+                            error!(error = %e, "Failed to reload configuration");
+                        }
+                    }
+                    AppEvent::ConfigError(err) => {
+                        warn!(error = %err, "Config file error");
+                    }
+                }
+            }
+            
+            // Handle Windows messages
+            let mut msg = std::mem::zeroed();
+            let result = PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_REMOVE);
+            if result > 0 {
+                if msg.message == WM_QUIT {
+                    break;
+                }
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            } else {
+                // No messages, sleep briefly to avoid busy waiting
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
         }
     }
+
+    // Cleanup hooks
+    state.cleanup_hooks();
 
     Ok(())
 }
