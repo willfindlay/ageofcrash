@@ -5,6 +5,8 @@ use config::Config;
 use hotkey::HotkeyDetector;
 use mouse_barrier::{MouseBarrier, KeyboardHook};
 use std::sync::{Arc, Mutex};
+use tracing::{info, Level};
+use tracing_subscriber;
 use winapi::um::winuser::*;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -12,15 +14,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Loading configuration...");
 
     let config = Config::load_or_create("config.ron")?;
-    println!("Barrier area: {}x{} at ({}, {})", 
-             config.barrier.width, config.barrier.height, 
-             config.barrier.x, config.barrier.y);
-    println!("Push factor: {}", config.barrier.push_factor);
-    println!("Hotkey: {}{}{}{}",
-             if config.hotkey.ctrl { "Ctrl+" } else { "" },
-             if config.hotkey.alt { "Alt+" } else { "" },
-             if config.hotkey.shift { "Shift+" } else { "" },
-             config.hotkey.key);
+    
+    // Initialize tracing based on debug flag
+    let level = if config.debug { Level::DEBUG } else { Level::INFO };
+    tracing_subscriber::fmt()
+        .with_max_level(level)
+        .with_target(false)
+        .with_thread_ids(false)
+        .with_file(false)
+        .with_line_number(false)
+        .init();
+
+    info!(
+        barrier.width = config.barrier.width,
+        barrier.height = config.barrier.height,
+        barrier.x = config.barrier.x,
+        barrier.y = config.barrier.y,
+        "Barrier area configured"
+    );
+    info!(push_factor = config.barrier.push_factor, "Push factor configured");
+    info!(
+        hotkey = format!("{}{}{}{}",
+            if config.hotkey.ctrl { "Ctrl+" } else { "" },
+            if config.hotkey.alt { "Alt+" } else { "" },
+            if config.hotkey.shift { "Shift+" } else { "" },
+            config.hotkey.key),
+        "Hotkey configured"
+    );
+    info!(debug = config.debug, "Debug mode");
 
     let mouse_barrier = MouseBarrier::new(
         config.barrier.x,
@@ -44,13 +65,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Ok(mut barrier) = barrier_clone.lock() {
                     match barrier.toggle() {
                         Ok(enabled) => {
-                            if enabled {
-                                println!("Mouse barrier ENABLED");
-                            } else {
-                                println!("Mouse barrier DISABLED");
-                            }
+                            info!(enabled = enabled, "Mouse barrier toggled");
                         }
-                        Err(e) => eprintln!("Failed to toggle barrier: {}", e),
+                        Err(e) => tracing::error!(error = %e, "Failed to toggle barrier"),
                     }
                 }
             }
@@ -58,8 +75,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     keyboard_hook.enable()?;
-    println!("Keyboard hook enabled. Press the hotkey to toggle the mouse barrier.");
-    println!("Press Ctrl+C to exit.");
+    info!("Keyboard hook enabled. Press the hotkey to toggle the mouse barrier.");
+    info!("Press Ctrl+C to exit.");
 
     unsafe {
         let mut msg = std::mem::zeroed();
