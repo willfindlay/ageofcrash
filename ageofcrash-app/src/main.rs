@@ -98,6 +98,15 @@ impl AppState {
             }
         }
         
+        // Check if debug flag changed
+        if self.config.debug != new_config.debug {
+            if new_config.debug {
+                info!("Debug mode enabled (some debug output may require restart to take full effect)");
+            } else {
+                info!("Debug mode disabled (some debug output may require restart to take full effect)");
+            }
+        }
+        
         // Update config
         self.config = new_config;
         
@@ -228,8 +237,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                     AppEvent::ConfigReloaded(new_config) => {
-                        // Note: Hotkey changes require restart for now
-                        // TODO: Implement dynamic hotkey updates
+                        // Update hotkey detector if hotkey changed
+                        if new_config.hotkey != state.config.hotkey {
+                            if let Ok(mut detector) = hotkey_detector.lock() {
+                                if detector.update_config(new_config.hotkey.clone()).is_some() {
+                                    info!("Hotkey updated successfully");
+                                } else {
+                                    warn!("Failed to update hotkey - invalid key specified");
+                                }
+                            }
+                        }
                         
                         if let Err(e) = state.reload_config(new_config) {
                             error!(error = %e, "Failed to reload configuration");

@@ -7,7 +7,7 @@ pub struct Config {
     pub debug: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct HotkeyConfig {
     pub ctrl: bool,
     pub alt: bool,
