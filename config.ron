@@ -25,6 +25,24 @@
         overlay_alpha: 200,  // Transparency (0=invisible, 255=fully opaque)
     ),
     
+    // HUD configuration - status display in corner of screen
+    hud: (
+        enabled: true,        // Show/hide the HUD display
+        position: TopLeft,    // Position: TopLeft, TopRight, BottomLeft, BottomRight
+        font_size: 12,        // Text size in the HUD
+        background_color: (
+            r: 0,             // Black background
+            g: 0,
+            b: 0,
+        ),
+        background_alpha: 180, // Background transparency (0=invisible, 255=opaque)
+        text_color: (
+            r: 255,           // White text
+            g: 255,
+            b: 255,
+        ),
+    ),
+    
     // Debug mode - enables detailed logging
     debug: false,         // Set to true for verbose debug output
 )
