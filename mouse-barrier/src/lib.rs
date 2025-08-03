@@ -399,24 +399,52 @@ fn push_point_out_of_rect(point: &POINT, rect: &RECT, push_factor: i32) -> POINT
         .min(dist_to_bottom);
 
     let new_point = if min_dist == dist_to_left {
+        // Push left, but ensure we don't go below 0
+        let target_x = rect.left - push_factor;
         POINT {
-            x: rect.left - push_factor,
+            x: if target_x < 0 {
+                // If pushing left would go off-screen, push right instead
+                rect.right + push_factor
+            } else {
+                target_x
+            },
             y: point.y,
         }
     } else if min_dist == dist_to_right {
+        // Push right, but ensure we don't exceed screen width
+        let target_x = rect.right + push_factor;
         POINT {
-            x: rect.right + push_factor,
+            x: if target_x >= screen_width {
+                // If pushing right would go off-screen, push left instead
+                (rect.left - push_factor).max(0)
+            } else {
+                target_x
+            },
             y: point.y,
         }
     } else if min_dist == dist_to_top {
+        // Push up, but ensure we don't go below 0
+        let target_y = rect.top - push_factor;
         POINT {
             x: point.x,
-            y: rect.top - push_factor,
+            y: if target_y < 0 {
+                // If pushing up would go off-screen, push down instead
+                rect.bottom + push_factor
+            } else {
+                target_y
+            },
         }
     } else {
+        // Push down, but ensure we don't exceed screen height
+        let target_y = rect.bottom + push_factor;
         POINT {
             x: point.x,
-            y: rect.bottom + push_factor,
+            y: if target_y >= screen_height {
+                // If pushing down would go off-screen, push up instead
+                (rect.top - push_factor).max(0)
+            } else {
+                target_y
+            },
         }
     };
 
@@ -428,13 +456,9 @@ fn push_point_out_of_rect(point: &POINT, rect: &RECT, push_factor: i32) -> POINT
     let logical_x = (new_point.x as f64 * scale_x).round() as i32;
     let logical_y = (new_point.y as f64 * scale_y).round() as i32;
 
-    // Clamp to screen boundaries
-    let logical_x = logical_x.max(0).min(screen_width - 1);
-    let logical_y = logical_y.max(0).min(screen_height - 1);
-
     POINT {
-        x: logical_x,
-        y: logical_y,
+        x: logical_x.clamp(0, screen_width - 1),
+        y: logical_y.clamp(0, screen_height - 1),
     }
 }
 
