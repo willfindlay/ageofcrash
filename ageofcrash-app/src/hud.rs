@@ -16,6 +16,14 @@ const HUD_PADDING: i32 = 10;
 const HUD_LINE_HEIGHT: i32 = 18;
 const HUD_TITLE_SPACING: i32 = 5;
 
+// HUD color constants (COLORREF format: 0x00BBGGRR)
+const COLOR_WHITE: u32 = 0x00FFFFFF;
+const COLOR_BLACK: u32 = 0x00000000;
+const COLOR_GREEN: u32 = 0x0064FF64;
+const COLOR_RED: u32 = 0x006464FF;
+const COLOR_YELLOW: u32 = 0x0064FFFF;
+const COLOR_DANGER_RED: u32 = 0x000000FF;
+
 pub struct Hud {
     hwnd: HWND,
     config: HudConfig,
@@ -288,11 +296,11 @@ unsafe extern "system" fn hud_window_proc(
             let old_font = SelectObject(mem_dc, font as *mut _);
 
             // Set text colors on memory DC
-            SetTextColor(mem_dc, RGB(255, 255, 255)); // White text
+            SetTextColor(mem_dc, COLOR_WHITE); // White text
             SetBkMode(mem_dc, TRANSPARENT as i32);
 
             // Draw background on memory DC
-            let bg_brush = CreateSolidBrush(RGB(0, 0, 0)); // Black background
+            let bg_brush = CreateSolidBrush(COLOR_BLACK); // Black background
             FillRect(mem_dc, &rect, bg_brush);
             DeleteObject(bg_brush as *mut _);
 
@@ -361,9 +369,9 @@ unsafe fn draw_hud_content(hdc: HDC, rect: &RECT) {
 
     // Color code based on status
     if state.enabled {
-        SetTextColor(hdc, RGB(100, 255, 100)); // Green for enabled
+        SetTextColor(hdc, COLOR_GREEN); // Green for enabled
     } else {
-        SetTextColor(hdc, RGB(255, 100, 100)); // Red for disabled
+        SetTextColor(hdc, COLOR_RED); // Red for disabled
     }
 
     TextOutW(
@@ -375,7 +383,7 @@ unsafe fn draw_hud_content(hdc: HDC, rect: &RECT) {
     );
     y_pos += HUD_LINE_HEIGHT;
 
-    SetTextColor(hdc, RGB(255, 255, 255)); // Back to white
+    SetTextColor(hdc, COLOR_WHITE); // Back to white
 
     // Coordinates
     let coord_text = format!("Position: ({}, {})", state.x, state.y);
@@ -448,7 +456,7 @@ unsafe fn draw_hud_content(hdc: HDC, rect: &RECT) {
         .chain(std::iter::once(0))
         .collect();
 
-    SetTextColor(hdc, RGB(255, 255, 100)); // Yellow color
+    SetTextColor(hdc, COLOR_YELLOW); // Yellow color
     TextOutW(
         hdc,
         rect.left + HUD_PADDING,
@@ -460,7 +468,9 @@ unsafe fn draw_hud_content(hdc: HDC, rect: &RECT) {
 
     // Mouse in barrier status
     let barrier_status_text = if state.mouse_in_barrier {
-        "Mouse Status: IN BARRIER ZONE"
+        "Mouse Status: IN BARRIER"
+    } else if state.mouse_in_buffer {
+        "Mouse Status: IN BUFFER ZONE"
     } else {
         "Mouse Status: Okay"
     };
@@ -470,11 +480,13 @@ unsafe fn draw_hud_content(hdc: HDC, rect: &RECT) {
         .chain(std::iter::once(0))
         .collect();
 
-    // Color based on whether mouse is in barrier
+    // Color based on mouse location
     if state.mouse_in_barrier {
-        SetTextColor(hdc, RGB(255, 0, 0)); // Red when in barrier
+        SetTextColor(hdc, COLOR_DANGER_RED); // Red when in inner barrier
+    } else if state.mouse_in_buffer {
+        SetTextColor(hdc, COLOR_YELLOW); // Yellow when in buffer zone
     } else {
-        SetTextColor(hdc, RGB(255, 255, 255)); // White like other text
+        SetTextColor(hdc, COLOR_WHITE); // White when okay
     }
 
     TextOutW(
@@ -502,6 +514,7 @@ pub struct HudState {
     pub mouse_x: i32,
     pub mouse_y: i32,
     pub mouse_in_barrier: bool,
+    pub mouse_in_buffer: bool,
     pub last_refresh: Instant,
 }
 
@@ -517,6 +530,7 @@ lazy_static::lazy_static! {
         mouse_x: 0,
         mouse_y: 0,
         mouse_in_barrier: false,
+        mouse_in_buffer: false,
         last_refresh: Instant::now(),
     }));
 }
@@ -556,15 +570,21 @@ pub fn update_mouse_position(x: i32, y: i32) {
             let barrier_left = state.x;
             let barrier_right = state.x + state.width;
 
+            // Check if mouse is within inner barrier (without buffer)
+            let in_inner_barrier =
+                x >= barrier_left && x <= barrier_right && y >= barrier_top && y <= barrier_bottom;
+
             // Check if mouse is within barrier + buffer zone
-            let in_barrier = x >= (barrier_left - state.buffer_zone)
+            let in_buffer_zone = x >= (barrier_left - state.buffer_zone)
                 && x <= (barrier_right + state.buffer_zone)
                 && y >= (barrier_top - state.buffer_zone)
                 && y <= (barrier_bottom + state.buffer_zone);
 
-            state.mouse_in_barrier = in_barrier;
+            state.mouse_in_barrier = in_inner_barrier;
+            state.mouse_in_buffer = in_buffer_zone && !in_inner_barrier;
         } else {
             state.mouse_in_barrier = false;
+            state.mouse_in_buffer = false;
         }
 
         // Only refresh if enough time has passed since last refresh
