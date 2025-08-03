@@ -8,6 +8,14 @@ use winapi::um::libloaderapi::GetModuleHandleW;
 use winapi::um::wingdi::*;
 use winapi::um::winuser::*;
 
+// HUD window dimensions and layout constants
+const HUD_WIDTH: i32 = 300;
+const HUD_HEIGHT: i32 = 180;
+const HUD_MARGIN: i32 = 20;
+const HUD_PADDING: i32 = 10;
+const HUD_LINE_HEIGHT: i32 = 18;
+const HUD_TITLE_SPACING: i32 = 5;
+
 pub struct Hud {
     hwnd: HWND,
     config: HudConfig,
@@ -123,8 +131,8 @@ impl Hud {
                 HWND_TOPMOST,
                 x,
                 y,
-                300, // Width
-                150, // Height
+                HUD_WIDTH,
+                HUD_HEIGHT,
                 SWP_NOACTIVATE | SWP_NOOWNERZORDER,
             );
         }
@@ -195,8 +203,8 @@ fn create_hud_window(config: &HudConfig) -> Result<HWND, Box<dyn std::error::Err
             WS_POPUP,
             x,
             y,
-            300, // Width
-            150, // Height
+            HUD_WIDTH,
+            HUD_HEIGHT,
             ptr::null_mut(),
             ptr::null_mut(),
             GetModuleHandleW(ptr::null()),
@@ -225,17 +233,13 @@ fn calculate_hud_position(
     let screen_width = unsafe { GetSystemMetrics(SM_CXSCREEN) };
     let screen_height = unsafe { GetSystemMetrics(SM_CYSCREEN) };
 
-    let hud_width = 300;
-    let hud_height = 150;
-    let margin = 20;
-
     let (x, y) = match position {
-        HudPosition::TopLeft => (margin, margin),
-        HudPosition::TopRight => (screen_width - hud_width - margin, margin),
-        HudPosition::BottomLeft => (margin, screen_height - hud_height - margin),
+        HudPosition::TopLeft => (HUD_MARGIN, HUD_MARGIN),
+        HudPosition::TopRight => (screen_width - HUD_WIDTH - HUD_MARGIN, HUD_MARGIN),
+        HudPosition::BottomLeft => (HUD_MARGIN, screen_height - HUD_HEIGHT - HUD_MARGIN),
         HudPosition::BottomRight => (
-            screen_width - hud_width - margin,
-            screen_height - hud_height - margin,
+            screen_width - HUD_WIDTH - HUD_MARGIN,
+            screen_height - HUD_HEIGHT - HUD_MARGIN,
         ),
     };
 
@@ -326,8 +330,7 @@ unsafe extern "system" fn hud_window_proc(
 unsafe fn draw_hud_content(hdc: HDC, rect: &RECT) {
     let state = HUD_STATE.lock().unwrap();
 
-    let mut y_pos = rect.top + 10;
-    let line_height = 18;
+    let mut y_pos = rect.top + HUD_PADDING;
 
     // Title
     let title_text: Vec<u16> = OsStr::new("Age of Crash - by HousedHorse")
@@ -337,12 +340,12 @@ unsafe fn draw_hud_content(hdc: HDC, rect: &RECT) {
 
     TextOutW(
         hdc,
-        rect.left + 10,
+        rect.left + HUD_PADDING,
         y_pos,
         title_text.as_ptr(),
         title_text.len() as i32 - 1,
     );
-    y_pos += line_height + 5;
+    y_pos += HUD_LINE_HEIGHT + HUD_TITLE_SPACING;
 
     // Status with color coding
     let status_text = if state.enabled {
@@ -365,12 +368,12 @@ unsafe fn draw_hud_content(hdc: HDC, rect: &RECT) {
 
     TextOutW(
         hdc,
-        rect.left + 10,
+        rect.left + HUD_PADDING,
         y_pos,
         status_wide.as_ptr(),
         status_wide.len() as i32 - 1,
     );
-    y_pos += line_height;
+    y_pos += HUD_LINE_HEIGHT;
 
     SetTextColor(hdc, RGB(255, 255, 255)); // Back to white
 
@@ -383,12 +386,12 @@ unsafe fn draw_hud_content(hdc: HDC, rect: &RECT) {
 
     TextOutW(
         hdc,
-        rect.left + 10,
+        rect.left + HUD_PADDING,
         y_pos,
         coord_wide.as_ptr(),
         coord_wide.len() as i32 - 1,
     );
-    y_pos += line_height;
+    y_pos += HUD_LINE_HEIGHT;
 
     // Size
     let size_text = format!("Size: {} x {}", state.width, state.height);
@@ -399,12 +402,12 @@ unsafe fn draw_hud_content(hdc: HDC, rect: &RECT) {
 
     TextOutW(
         hdc,
-        rect.left + 10,
+        rect.left + HUD_PADDING,
         y_pos,
         size_wide.as_ptr(),
         size_wide.len() as i32 - 1,
     );
-    y_pos += line_height;
+    y_pos += HUD_LINE_HEIGHT;
 
     // Buffer zone
     let buffer_text = format!("Buffer Zone: {}px", state.buffer_zone);
@@ -415,12 +418,12 @@ unsafe fn draw_hud_content(hdc: HDC, rect: &RECT) {
 
     TextOutW(
         hdc,
-        rect.left + 10,
+        rect.left + HUD_PADDING,
         y_pos,
         buffer_wide.as_ptr(),
         buffer_wide.len() as i32 - 1,
     );
-    y_pos += line_height;
+    y_pos += HUD_LINE_HEIGHT;
 
     // Push factor
     let push_text = format!("Push Factor: {}px", state.push_factor);
@@ -431,12 +434,12 @@ unsafe fn draw_hud_content(hdc: HDC, rect: &RECT) {
 
     TextOutW(
         hdc,
-        rect.left + 10,
+        rect.left + HUD_PADDING,
         y_pos,
         push_wide.as_ptr(),
         push_wide.len() as i32 - 1,
     );
-    y_pos += line_height;
+    y_pos += HUD_LINE_HEIGHT;
 
     // Mouse position in yellow
     let mouse_text = format!("Mouse: ({}, {})", state.mouse_x, state.mouse_y);
@@ -448,10 +451,38 @@ unsafe fn draw_hud_content(hdc: HDC, rect: &RECT) {
     SetTextColor(hdc, RGB(255, 255, 100)); // Yellow color
     TextOutW(
         hdc,
-        rect.left + 10,
+        rect.left + HUD_PADDING,
         y_pos,
         mouse_wide.as_ptr(),
         mouse_wide.len() as i32 - 1,
+    );
+    y_pos += HUD_LINE_HEIGHT;
+
+    // Mouse in barrier status
+    let barrier_status_text = if state.mouse_in_barrier {
+        "Mouse Status: IN BARRIER ZONE"
+    } else {
+        "Mouse Status: Okay"
+    };
+
+    let barrier_status_wide: Vec<u16> = OsStr::new(barrier_status_text)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    // Color based on whether mouse is in barrier
+    if state.mouse_in_barrier {
+        SetTextColor(hdc, RGB(255, 0, 0)); // Red when in barrier
+    } else {
+        SetTextColor(hdc, RGB(255, 255, 255)); // White like other text
+    }
+
+    TextOutW(
+        hdc,
+        rect.left + HUD_PADDING,
+        y_pos,
+        barrier_status_wide.as_ptr(),
+        barrier_status_wide.len() as i32 - 1,
     );
 }
 
@@ -470,6 +501,7 @@ pub struct HudState {
     pub push_factor: i32,
     pub mouse_x: i32,
     pub mouse_y: i32,
+    pub mouse_in_barrier: bool,
     pub last_refresh: Instant,
 }
 
@@ -484,6 +516,7 @@ lazy_static::lazy_static! {
         push_factor: 0,
         mouse_x: 0,
         mouse_y: 0,
+        mouse_in_barrier: false,
         last_refresh: Instant::now(),
     }));
 }
@@ -514,6 +547,25 @@ pub fn update_mouse_position(x: i32, y: i32) {
     if let Ok(mut state) = HUD_STATE.lock() {
         state.mouse_x = x;
         state.mouse_y = y;
+
+        // Check if mouse is in barrier zone
+        if state.enabled {
+            // Convert from Windows top-left origin to bottom-left origin for comparison
+            let barrier_bottom = state.y;
+            let barrier_top = state.y - state.height;
+            let barrier_left = state.x;
+            let barrier_right = state.x + state.width;
+
+            // Check if mouse is within barrier + buffer zone
+            let in_barrier = x >= (barrier_left - state.buffer_zone)
+                && x <= (barrier_right + state.buffer_zone)
+                && y >= (barrier_top - state.buffer_zone)
+                && y <= (barrier_bottom + state.buffer_zone);
+
+            state.mouse_in_barrier = in_barrier;
+        } else {
+            state.mouse_in_barrier = false;
+        }
 
         // Only refresh if enough time has passed since last refresh
         let now = Instant::now();
