@@ -4,13 +4,13 @@ mod hotkey;
 mod hud;
 
 use config::Config;
-use config_watcher::{ConfigWatcher, ConfigEvent};
+use config_watcher::{ConfigEvent, ConfigWatcher};
 use hotkey::HotkeyDetector;
 use hud::Hud;
-use mouse_barrier::{MouseBarrier, KeyboardHook, set_mouse_position_callback};
+use mouse_barrier::{set_mouse_position_callback, KeyboardHook, MouseBarrier};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
-use std::sync::mpsc::{self, Sender, Receiver};
-use tracing::{info, warn, error, Level};
+use tracing::{error, info, warn, Level};
 use winapi::um::winuser::*;
 
 enum AppEvent {
@@ -48,16 +48,20 @@ impl AppState {
             self.config.barrier.height,
             self.config.barrier.buffer_zone,
             self.config.barrier.push_factor,
-            (self.config.barrier.overlay_color.r, self.config.barrier.overlay_color.g, self.config.barrier.overlay_color.b),
+            (
+                self.config.barrier.overlay_color.r,
+                self.config.barrier.overlay_color.g,
+                self.config.barrier.overlay_color.b,
+            ),
             self.config.barrier.overlay_alpha,
         ));
-        
+
         if self.barrier_enabled {
             if let Some(barrier) = &mut self.mouse_barrier {
                 barrier.enable()?;
             }
         }
-        
+
         Ok(())
     }
 
@@ -84,7 +88,7 @@ impl AppState {
         if let Some(mut barrier) = self.mouse_barrier.take() {
             let _ = barrier.disable();
         }
-        
+
         // Disable keyboard hook
         if let Some(mut hook) = self.keyboard_hook.take() {
             let _ = hook.disable();
@@ -97,12 +101,12 @@ impl AppState {
             info!("Skipping config reload during startup grace period");
             return Ok(());
         }
-        
+
         info!("Reloading configuration...");
-        
+
         // Check if barrier is currently enabled before updating
         let was_enabled = self.barrier_enabled;
-        
+
         // Update the barrier configuration using the existing global state
         if let Some(barrier) = &mut self.mouse_barrier {
             barrier.update_barrier(
@@ -112,10 +116,14 @@ impl AppState {
                 new_config.barrier.height,
                 new_config.barrier.buffer_zone,
                 new_config.barrier.push_factor,
-                (new_config.barrier.overlay_color.r, new_config.barrier.overlay_color.g, new_config.barrier.overlay_color.b),
+                (
+                    new_config.barrier.overlay_color.r,
+                    new_config.barrier.overlay_color.g,
+                    new_config.barrier.overlay_color.b,
+                ),
                 new_config.barrier.overlay_alpha,
             );
-            
+
             // If barrier was enabled, toggle it off and back on to refresh overlay windows
             if was_enabled {
                 info!("Refreshing overlay windows with new barrier dimensions");
@@ -123,7 +131,7 @@ impl AppState {
                 barrier.enable()?;
             }
         }
-        
+
         // Check if debug flag changed
         if self.config.debug != new_config.debug {
             if new_config.debug {
@@ -132,33 +140,33 @@ impl AppState {
                 info!("Debug mode disabled (some debug output may require restart to take full effect)");
             }
         }
-        
+
         // Update HUD if configuration changed
         if let Some(hud) = &mut self.hud {
             if let Err(e) = hud.update_config(new_config.hud.clone()) {
                 warn!("Failed to update HUD configuration: {}", e);
             }
         }
-        
+
         // Update config
         self.config = new_config;
-        
+
         // Update HUD state with new barrier configuration
         self.update_hud_state();
-        
+
         info!("Configuration reloaded successfully");
         log_config(&self.config);
-        
+
         Ok(())
     }
 
     fn toggle_barrier(&mut self) -> Result<bool, Box<dyn std::error::Error>> {
         if let Some(barrier) = &mut self.mouse_barrier {
             self.barrier_enabled = barrier.toggle()?;
-            
+
             // Update HUD with new barrier state
             self.update_hud_state();
-            
+
             // Force HUD refresh
             if let Some(hud) = &mut self.hud {
                 if let Err(e) = hud.update_barrier_state(
@@ -173,7 +181,7 @@ impl AppState {
                     warn!("Failed to update HUD barrier state: {}", e);
                 }
             }
-            
+
             Ok(self.barrier_enabled)
         } else {
             Err("Mouse barrier not initialized".into())
@@ -190,13 +198,18 @@ fn log_config(config: &Config) {
         barrier.buffer_zone = config.barrier.buffer_zone,
         "Barrier area configured"
     );
-    info!(push_factor = config.barrier.push_factor, "Push factor configured");
     info!(
-        hotkey = format!("{}{}{}{}",
+        push_factor = config.barrier.push_factor,
+        "Push factor configured"
+    );
+    info!(
+        hotkey = format!(
+            "{}{}{}{}",
             if config.hotkey.ctrl { "Ctrl+" } else { "" },
             if config.hotkey.alt { "Alt+" } else { "" },
             if config.hotkey.shift { "Shift+" } else { "" },
-            config.hotkey.key),
+            config.hotkey.key
+        ),
         "Hotkey configured"
     );
     info!(debug = config.debug, "Debug mode");
@@ -207,9 +220,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Loading configuration...");
 
     let config = Config::load_or_create("config.ron")?;
-    
+
     // Initialize tracing based on debug flag
-    let level = if config.debug { Level::DEBUG } else { Level::INFO };
+    let level = if config.debug {
+        Level::DEBUG
+    } else {
+        Level::INFO
+    };
     tracing_subscriber::fmt()
         .with_max_level(level)
         .with_target(false)
@@ -224,7 +241,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut state = AppState::new(config.clone());
     state.initialize_barrier()?;
     state.initialize_hud()?;
-    
+
     // Set up mouse position callback for HUD updates
     set_mouse_position_callback(|x, y| {
         hud::update_mouse_position(x, y);
@@ -232,21 +249,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create event channel for hotkey and config events
     let (tx, rx): (Sender<AppEvent>, Receiver<AppEvent>) = mpsc::channel();
-    
+
     // Set up config watcher
     let (mut config_watcher, config_rx) = ConfigWatcher::new("config.ron")?;
     config_watcher.start()?;
-    
+
     // Keep config_watcher alive
     let _config_watcher = Arc::new(Mutex::new(config_watcher));
-    
+
     // Spawn thread to forward config events to main event channel
     let config_tx = tx.clone();
     std::thread::spawn(move || {
         loop {
             match config_rx.recv() {
                 Ok(ConfigEvent::Modified(new_config)) => {
-                    if config_tx.send(AppEvent::ConfigReloaded(new_config)).is_err() {
+                    if config_tx
+                        .send(AppEvent::ConfigReloaded(new_config))
+                        .is_err()
+                    {
                         break;
                     }
                 }
@@ -262,10 +282,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Set up keyboard hook
     let hotkey_detector = Arc::new(Mutex::new(
-        HotkeyDetector::new(config.hotkey.clone())
-            .ok_or("Failed to create hotkey detector")?
+        HotkeyDetector::new(config.hotkey.clone()).ok_or("Failed to create hotkey detector")?,
     ));
-    
+
     let hotkey_tx = tx.clone();
     let hotkey_detector_clone = hotkey_detector.clone();
     let mut keyboard_hook = KeyboardHook::new(move |vk_code, is_down| {
@@ -278,7 +297,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     keyboard_hook.enable()?;
     state.keyboard_hook = Some(keyboard_hook);
-    
+
     info!("Keyboard hook enabled. Press the hotkey to toggle the mouse barrier.");
     info!("Config file monitoring enabled. Changes will be applied automatically.");
     info!("Press Ctrl+C to exit.");
@@ -289,14 +308,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Process all pending application events first
             while let Ok(event) = rx.try_recv() {
                 match event {
-                    AppEvent::HotkeyPressed => {
-                        match state.toggle_barrier() {
-                            Ok(enabled) => {
-                                info!(enabled = enabled, "Mouse barrier toggled");
-                            }
-                            Err(e) => error!(error = %e, "Failed to toggle barrier"),
+                    AppEvent::HotkeyPressed => match state.toggle_barrier() {
+                        Ok(enabled) => {
+                            info!(enabled = enabled, "Mouse barrier toggled");
                         }
-                    }
+                        Err(e) => error!(error = %e, "Failed to toggle barrier"),
+                    },
                     AppEvent::ConfigReloaded(new_config) => {
                         // Update hotkey detector if hotkey changed
                         if new_config.hotkey != state.config.hotkey {
@@ -308,7 +325,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             }
                         }
-                        
+
                         if let Err(e) = state.reload_config(new_config) {
                             error!(error = %e, "Failed to reload configuration");
                         }
@@ -318,7 +335,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
-            
+
             // Handle Windows messages
             let mut msg = std::mem::zeroed();
             let result = PeekMessageW(&mut msg, std::ptr::null_mut(), 0, 0, PM_REMOVE);

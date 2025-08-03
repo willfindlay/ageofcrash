@@ -1,20 +1,24 @@
-use std::sync::{Arc, Mutex, OnceLock};
-use std::sync::atomic::{AtomicPtr, Ordering, AtomicI32};
-use tracing::{info, warn};
-use winapi::um::winuser::*;
-use winapi::um::libloaderapi::GetModuleHandleW;
-use winapi::shared::windef::{POINT, RECT, HWND};
-use winapi::shared::minwindef::{WPARAM, LPARAM, LRESULT, UINT, TRUE};
-use winapi::um::errhandlingapi::GetLastError;
-use winapi::um::wingdi::*;
-use std::ptr;
 use std::mem;
+use std::ptr;
+use std::sync::atomic::{AtomicI32, AtomicPtr, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+use tracing::{info, warn};
+use winapi::shared::minwindef::{LPARAM, LRESULT, TRUE, UINT, WPARAM};
+use winapi::shared::windef::{HWND, POINT, RECT};
+use winapi::um::errhandlingapi::GetLastError;
+use winapi::um::libloaderapi::GetModuleHandleW;
+use winapi::um::wingdi::*;
+use winapi::um::winuser::*;
 
 static MOUSE_BARRIER_STATE: OnceLock<Arc<Mutex<Option<MouseBarrierState>>>> = OnceLock::new();
-static KEYBOARD_CALLBACK: OnceLock<Arc<Mutex<Option<Box<dyn Fn(u32, bool) + Send + Sync>>>>> = OnceLock::new();
-static MOUSE_POSITION_CALLBACK: OnceLock<Arc<Mutex<Option<Box<dyn Fn(i32, i32) + Send + Sync>>>>> = OnceLock::new();
-static KEYBOARD_HOOK_HANDLE: AtomicPtr<winapi::shared::windef::HHOOK__> = AtomicPtr::new(std::ptr::null_mut());
-static MOUSE_HOOK_HANDLE: AtomicPtr<winapi::shared::windef::HHOOK__> = AtomicPtr::new(std::ptr::null_mut());
+static KEYBOARD_CALLBACK: OnceLock<Arc<Mutex<Option<Box<dyn Fn(u32, bool) + Send + Sync>>>>> =
+    OnceLock::new();
+static MOUSE_POSITION_CALLBACK: OnceLock<Arc<Mutex<Option<Box<dyn Fn(i32, i32) + Send + Sync>>>>> =
+    OnceLock::new();
+static KEYBOARD_HOOK_HANDLE: AtomicPtr<winapi::shared::windef::HHOOK__> =
+    AtomicPtr::new(std::ptr::null_mut());
+static MOUSE_HOOK_HANDLE: AtomicPtr<winapi::shared::windef::HHOOK__> =
+    AtomicPtr::new(std::ptr::null_mut());
 static LAST_IN_BARRIER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static OVERLAY_WINDOWS: [AtomicPtr<winapi::shared::windef::HWND__>; 4] = [
     AtomicPtr::new(std::ptr::null_mut()),
@@ -28,7 +32,8 @@ static SCREEN_WIDTH: AtomicI32 = AtomicI32::new(0);
 static SCREEN_HEIGHT: AtomicI32 = AtomicI32::new(0);
 
 // Current overlay color for window painting
-static CURRENT_OVERLAY_COLOR: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x00FF0000); // Default red
+static CURRENT_OVERLAY_COLOR: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(0x00FF0000); // Default red
 
 #[derive(Clone)]
 struct MouseBarrierState {
@@ -36,8 +41,8 @@ struct MouseBarrierState {
     buffer_zone: i32,
     push_factor: i32,
     enabled: bool,
-    overlay_color: u32,  // RGB color as 0x00RRGGBB
-    overlay_alpha: u8,   // Alpha transparency (0-255)
+    overlay_color: u32, // RGB color as 0x00RRGGBB
+    overlay_alpha: u8,  // Alpha transparency (0-255)
 }
 
 pub struct MouseBarrier;
@@ -45,13 +50,22 @@ pub struct MouseBarrier;
 pub struct KeyboardHook;
 
 impl MouseBarrier {
-    pub fn new(x: i32, y: i32, width: i32, height: i32, buffer_zone: i32, push_factor: i32, overlay_color: (u8, u8, u8), overlay_alpha: u8) -> Self {
+    pub fn new(
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+        buffer_zone: i32,
+        push_factor: i32,
+        overlay_color: (u8, u8, u8),
+        overlay_alpha: u8,
+    ) -> Self {
         // Convert from bottom-left origin to Windows top-left origin
         let barrier_rect = RECT {
             left: x,
-            top: y - height,    // y is bottom, so top = y - height
-            right: x + width,   // right extends from left
-            bottom: y,          // bottom is the y coordinate
+            top: y - height,  // y is bottom, so top = y - height
+            right: x + width, // right extends from left
+            bottom: y,        // bottom is the y coordinate
         };
 
         let state = MouseBarrierState {
@@ -59,7 +73,9 @@ impl MouseBarrier {
             buffer_zone,
             push_factor,
             enabled: false,
-            overlay_color: ((overlay_color.0 as u32) << 16) | ((overlay_color.1 as u32) << 8) | (overlay_color.2 as u32),
+            overlay_color: ((overlay_color.0 as u32) << 16)
+                | ((overlay_color.1 as u32) << 8)
+                | (overlay_color.2 as u32),
             overlay_alpha,
         };
 
@@ -90,7 +106,7 @@ impl MouseBarrier {
         if let Some(ref mut state) = *state_lock.lock().unwrap() {
             state.enabled = true;
         }
-        
+
         // Create overlay windows (4 rectangles)
         match create_overlay_windows() {
             Ok(windows) => {
@@ -105,7 +121,7 @@ impl MouseBarrier {
                 warn!("Failed to create overlay windows: {}", e);
             }
         }
-        
+
         unsafe {
             let hook = SetWindowsHookExW(
                 WH_MOUSE_LL,
@@ -126,20 +142,20 @@ impl MouseBarrier {
 
     pub fn disable(&mut self) -> Result<(), String> {
         let hook = MOUSE_HOOK_HANDLE.swap(std::ptr::null_mut(), Ordering::AcqRel);
-        
+
         if !hook.is_null() {
             let state_lock = MOUSE_BARRIER_STATE.get().unwrap();
             if let Some(ref mut state) = *state_lock.lock().unwrap() {
                 state.enabled = false;
             }
-            
+
             unsafe {
                 if UnhookWindowsHookEx(hook) == 0 {
                     return Err(format!("Failed to unhook mouse: {}", GetLastError()));
                 }
             }
         }
-        
+
         // Destroy overlay windows
         for atomic_ptr in &OVERLAY_WINDOWS {
             let hwnd = atomic_ptr.swap(ptr::null_mut(), Ordering::AcqRel);
@@ -174,25 +190,37 @@ impl MouseBarrier {
         }
     }
 
-    pub fn update_barrier(&mut self, x: i32, y: i32, width: i32, height: i32, buffer_zone: i32, push_factor: i32, overlay_color: (u8, u8, u8), overlay_alpha: u8) {
+    pub fn update_barrier(
+        &mut self,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+        buffer_zone: i32,
+        push_factor: i32,
+        overlay_color: (u8, u8, u8),
+        overlay_alpha: u8,
+    ) {
         let state_lock = MOUSE_BARRIER_STATE.get().unwrap();
         if let Some(ref mut state) = *state_lock.lock().unwrap() {
             // Convert from bottom-left origin to Windows top-left origin
             state.barrier_rect = RECT {
                 left: x,
-                top: y - height,    // y is bottom, so top = y - height
-                right: x + width,   // right extends from left
-                bottom: y,          // bottom is the y coordinate
+                top: y - height,  // y is bottom, so top = y - height
+                right: x + width, // right extends from left
+                bottom: y,        // bottom is the y coordinate
             };
             state.buffer_zone = buffer_zone;
             state.push_factor = push_factor;
-            state.overlay_color = ((overlay_color.0 as u32) << 16) | ((overlay_color.1 as u32) << 8) | (overlay_color.2 as u32);
+            state.overlay_color = ((overlay_color.0 as u32) << 16)
+                | ((overlay_color.1 as u32) << 8)
+                | (overlay_color.2 as u32);
             state.overlay_alpha = overlay_alpha;
-            
+
             // Update the global overlay color
             CURRENT_OVERLAY_COLOR.store(state.overlay_color, Ordering::Relaxed);
         }
-        
+
         // Update the overlay windows if they exist
         for atomic_ptr in &OVERLAY_WINDOWS {
             let hwnd = atomic_ptr.load(Ordering::Acquire);
@@ -212,15 +240,15 @@ impl Drop for MouseBarrier {
 }
 
 impl KeyboardHook {
-    pub fn new<F>(callback: F) -> Self 
-    where 
+    pub fn new<F>(callback: F) -> Self
+    where
         F: Fn(u32, bool) + Send + Sync + 'static,
     {
         let callback_lock = KEYBOARD_CALLBACK.get_or_init(|| Arc::new(Mutex::new(None)));
         *callback_lock.lock().unwrap() = Some(Box::new(callback));
 
         // Hook handle will be managed globally via atomic pointer
-        
+
         Self
     }
 
@@ -250,7 +278,7 @@ impl KeyboardHook {
 
     pub fn disable(&mut self) -> Result<(), String> {
         let hook = KEYBOARD_HOOK_HANDLE.swap(std::ptr::null_mut(), Ordering::AcqRel);
-        
+
         if !hook.is_null() {
             unsafe {
                 if UnhookWindowsHookEx(hook) == 0 {
@@ -269,9 +297,9 @@ impl Drop for KeyboardHook {
     }
 }
 
-pub fn set_mouse_position_callback<F>(callback: F) 
-where 
-    F: Fn(i32, i32) + Send + Sync + 'static 
+pub fn set_mouse_position_callback<F>(callback: F)
+where
+    F: Fn(i32, i32) + Send + Sync + 'static,
 {
     let callback_lock = MOUSE_POSITION_CALLBACK.get_or_init(|| Arc::new(Mutex::new(None)));
     if let Ok(mut guard) = callback_lock.lock() {
@@ -283,7 +311,7 @@ unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) 
     if code >= 0 && wparam == WM_MOUSEMOVE as WPARAM {
         let mouse_data = *(lparam as *const MSLLHOOKSTRUCT);
         let current_pos = mouse_data.pt;
-        
+
         // Update HUD with current mouse position
         if let Some(callback_lock) = MOUSE_POSITION_CALLBACK.get() {
             if let Ok(callback_guard) = callback_lock.lock() {
@@ -292,12 +320,11 @@ unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) 
                 }
             }
         }
-        
+
         if let Some(state_lock) = MOUSE_BARRIER_STATE.get() {
             if let Ok(state_guard) = state_lock.lock() {
                 if let Some(ref state) = *state_guard {
                     if state.enabled {
-                        
                         // Create buffer zone rect
                         let buffer_rect = RECT {
                             left: state.barrier_rect.left - state.buffer_zone,
@@ -305,19 +332,23 @@ unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) 
                             right: state.barrier_rect.right + state.buffer_zone,
                             bottom: state.barrier_rect.bottom + state.buffer_zone,
                         };
-                        
+
                         let in_buffer = point_in_rect(&current_pos, &buffer_rect);
                         let was_in_buffer = LAST_IN_BARRIER.load(Ordering::Acquire);
-                        
+
                         if in_buffer != was_in_buffer {
                             LAST_IN_BARRIER.store(in_buffer, Ordering::Release);
                         }
-                        
+
                         if in_buffer {
-                            let new_pos = push_point_out_of_rect(&current_pos, &buffer_rect, state.push_factor);
-                            
+                            let new_pos = push_point_out_of_rect(
+                                &current_pos,
+                                &buffer_rect,
+                                state.push_factor,
+                            );
+
                             SetCursorPos(new_pos.x, new_pos.y);
-                            
+
                             return 1;
                         }
                     }
@@ -335,7 +366,8 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
             if let Ok(callback_guard) = callback_lock.lock() {
                 if let Some(ref callback) = *callback_guard {
                     let kbd_data = *(lparam as *const KBDLLHOOKSTRUCT);
-                    let is_key_down = wparam == WM_KEYDOWN as WPARAM || wparam == WM_SYSKEYDOWN as WPARAM;
+                    let is_key_down =
+                        wparam == WM_KEYDOWN as WPARAM || wparam == WM_SYSKEYDOWN as WPARAM;
                     callback(kbd_data.vkCode, is_key_down);
                 }
             }
@@ -353,73 +385,101 @@ fn push_point_out_of_rect(point: &POINT, rect: &RECT, push_factor: i32) -> POINT
     // Use cached screen metrics
     let screen_width = SCREEN_WIDTH.load(Ordering::Relaxed);
     let screen_height = SCREEN_HEIGHT.load(Ordering::Relaxed);
-    
+
     // Determine which edge the mouse is closest to and push away from that edge
     let dist_to_left = point.x - rect.left;
     let dist_to_right = rect.right - point.x;
     let dist_to_top = point.y - rect.top;
     let dist_to_bottom = rect.bottom - point.y;
-    
+
     // Find the minimum distance to determine which edge to push from
-    let min_dist = dist_to_left.min(dist_to_right).min(dist_to_top).min(dist_to_bottom);
-    
+    let min_dist = dist_to_left
+        .min(dist_to_right)
+        .min(dist_to_top)
+        .min(dist_to_bottom);
+
     let new_point = if min_dist == dist_to_left {
-        POINT { x: rect.left - push_factor, y: point.y }
+        POINT {
+            x: rect.left - push_factor,
+            y: point.y,
+        }
     } else if min_dist == dist_to_right {
-        POINT { x: rect.right + push_factor, y: point.y }
+        POINT {
+            x: rect.right + push_factor,
+            y: point.y,
+        }
     } else if min_dist == dist_to_top {
-        POINT { x: point.x, y: rect.top - push_factor }
+        POINT {
+            x: point.x,
+            y: rect.top - push_factor,
+        }
     } else {
-        POINT { x: point.x, y: rect.bottom + push_factor }
+        POINT {
+            x: point.x,
+            y: rect.bottom + push_factor,
+        }
     };
-    
+
     // Convert from physical coordinates to logical coordinates for SetCursorPos
     // Physical screen: ~3840x2160, Logical screen: varies
     let scale_x = screen_width as f64 / 3840.0;
     let scale_y = screen_height as f64 / 2160.0;
-    
-    let logical_x = (new_point.x as f64 * scale_x).round() as i32;  
+
+    let logical_x = (new_point.x as f64 * scale_x).round() as i32;
     let logical_y = (new_point.y as f64 * scale_y).round() as i32;
-    
+
     // Clamp to screen boundaries
     let logical_x = logical_x.max(0).min(screen_width - 1);
     let logical_y = logical_y.max(0).min(screen_height - 1);
-    
-    POINT { x: logical_x, y: logical_y }
+
+    POINT {
+        x: logical_x,
+        y: logical_y,
+    }
 }
 
-unsafe extern "system" fn window_proc(hwnd: HWND, msg: UINT, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+unsafe extern "system" fn window_proc(
+    hwnd: HWND,
+    msg: UINT,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
     match msg {
         WM_PAINT => {
             let mut ps: PAINTSTRUCT = mem::zeroed();
             let hdc = BeginPaint(hwnd, &mut ps);
-            
+
             // Draw overlay rectangle with configured color
             let color = CURRENT_OVERLAY_COLOR.load(Ordering::Relaxed);
             let r = ((color >> 16) & 0xFF) as u8;
             let g = ((color >> 8) & 0xFF) as u8;
             let b = (color & 0xFF) as u8;
-            
+
             let brush = CreateSolidBrush(RGB(r, g, b));
-            let mut client_rect = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+            let mut client_rect = RECT {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            };
             GetClientRect(hwnd, &mut client_rect);
             FillRect(hdc, &client_rect, brush);
             DeleteObject(brush as *mut _);
-            
+
             EndPaint(hwnd, &ps);
             0
         }
         WM_ERASEBKGND => {
             1 // Return non-zero to indicate we handled it
         }
-        _ => DefWindowProcW(hwnd, msg, wparam, lparam)
+        _ => DefWindowProcW(hwnd, msg, wparam, lparam),
     }
 }
 
 fn create_overlay_windows() -> Result<Vec<HWND>, String> {
     let state_lock = MOUSE_BARRIER_STATE.get().unwrap();
     let mut windows = Vec::new();
-    
+
     if let Ok(state_guard) = state_lock.lock() {
         if let Some(ref state) = *state_guard {
             // Calculate positions for 4 windows
@@ -427,18 +487,18 @@ fn create_overlay_windows() -> Result<Vec<HWND>, String> {
             let screen_height = unsafe { GetSystemMetrics(SM_CYSCREEN) };
             let scale_x = screen_width as f64 / 3840.0;
             let scale_y = screen_height as f64 / 2160.0;
-            
+
             let barrier_left = (state.barrier_rect.left as f64 * scale_x).round() as i32;
             let barrier_top = (state.barrier_rect.top as f64 * scale_y).round() as i32;
             let barrier_right = (state.barrier_rect.right as f64 * scale_x).round() as i32;
             let barrier_bottom = (state.barrier_rect.bottom as f64 * scale_y).round() as i32;
-            
+
             let scaled_buffer = (state.buffer_zone as f64 * scale_x).round() as i32;
             let buffer_left = barrier_left - scaled_buffer;
             let buffer_top = barrier_top - scaled_buffer;
             let buffer_right = barrier_right + scaled_buffer;
             let buffer_bottom = barrier_bottom + scaled_buffer;
-            
+
             // Create 4 windows - top, bottom, left, right
             // Clamp to screen boundaries to avoid covering taskbar
             let max_bottom = screen_height - 60; // Leave space for taskbar
@@ -446,17 +506,48 @@ fn create_overlay_windows() -> Result<Vec<HWND>, String> {
             let clamped_buffer_top = buffer_top.max(0);
             let clamped_buffer_left = buffer_left.max(0);
             let clamped_buffer_right = buffer_right.min(screen_width);
-            
+
             let window_configs = [
-                ("top", clamped_buffer_left, clamped_buffer_top, clamped_buffer_right - clamped_buffer_left, barrier_top - clamped_buffer_top),
-                ("bottom", clamped_buffer_left, barrier_bottom, clamped_buffer_right - clamped_buffer_left, clamped_buffer_bottom - barrier_bottom),
-                ("left", clamped_buffer_left, barrier_top, barrier_left - clamped_buffer_left, barrier_bottom - barrier_top),
-                ("right", barrier_right, barrier_top, clamped_buffer_right - barrier_right, barrier_bottom - barrier_top),
+                (
+                    "top",
+                    clamped_buffer_left,
+                    clamped_buffer_top,
+                    clamped_buffer_right - clamped_buffer_left,
+                    barrier_top - clamped_buffer_top,
+                ),
+                (
+                    "bottom",
+                    clamped_buffer_left,
+                    barrier_bottom,
+                    clamped_buffer_right - clamped_buffer_left,
+                    clamped_buffer_bottom - barrier_bottom,
+                ),
+                (
+                    "left",
+                    clamped_buffer_left,
+                    barrier_top,
+                    barrier_left - clamped_buffer_left,
+                    barrier_bottom - barrier_top,
+                ),
+                (
+                    "right",
+                    barrier_right,
+                    barrier_top,
+                    clamped_buffer_right - barrier_right,
+                    barrier_bottom - barrier_top,
+                ),
             ];
-            
+
             for (name, x, y, width, height) in window_configs.iter() {
                 if *width > 0 && *height > 0 {
-                    match create_single_overlay_window(*x, *y, *width, *height, state.overlay_color, state.overlay_alpha) {
+                    match create_single_overlay_window(
+                        *x,
+                        *y,
+                        *width,
+                        *height,
+                        state.overlay_color,
+                        state.overlay_alpha,
+                    ) {
                         Ok(hwnd) => windows.push(hwnd),
                         Err(e) => return Err(format!("Failed to create {} window: {}", name, e)),
                     }
@@ -464,19 +555,26 @@ fn create_overlay_windows() -> Result<Vec<HWND>, String> {
             }
         }
     }
-    
+
     Ok(windows)
 }
 
-fn create_single_overlay_window(x: i32, y: i32, width: i32, height: i32, _color: u32, alpha: u8) -> Result<HWND, String> {
+fn create_single_overlay_window(
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    _color: u32,
+    alpha: u8,
+) -> Result<HWND, String> {
     unsafe {
         let instance = GetModuleHandleW(ptr::null());
         let class_name: Vec<u16> = "MouseBarrierOverlay\0".encode_utf16().collect();
-        
+
         // Check if class is already registered
         let mut wc_existing: WNDCLASSEXW = mem::zeroed();
         wc_existing.cbSize = mem::size_of::<WNDCLASSEXW>() as u32;
-        
+
         if GetClassInfoExW(instance, class_name.as_ptr(), &mut wc_existing) == 0 {
             // Class not registered, so register it
             let wc = WNDCLASSEXW {
@@ -493,36 +591,42 @@ fn create_single_overlay_window(x: i32, y: i32, width: i32, height: i32, _color:
                 lpszClassName: class_name.as_ptr(),
                 hIconSm: ptr::null_mut(),
             };
-            
+
             if RegisterClassExW(&wc) == 0 {
-                return Err(format!("Failed to register window class: {}", GetLastError()));
+                return Err(format!(
+                    "Failed to register window class: {}",
+                    GetLastError()
+                ));
             }
         }
-        
+
         // Use the provided window dimensions
-        
+
         let hwnd = CreateWindowExW(
             WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
             class_name.as_ptr(),
             class_name.as_ptr(),
             WS_POPUP,
-            x, y, width, height,
+            x,
+            y,
+            width,
+            height,
             ptr::null_mut(),
             ptr::null_mut(),
             instance,
             ptr::null_mut(),
         );
-        
+
         if hwnd.is_null() {
             return Err(format!("Failed to create window: {}", GetLastError()));
         }
-        
+
         // Use configurable alpha transparency
         SetLayeredWindowAttributes(hwnd, 0, alpha, LWA_ALPHA);
-        
+
         ShowWindow(hwnd, SW_SHOW);
         UpdateWindow(hwnd);
-        
+
         Ok(hwnd)
     }
 }

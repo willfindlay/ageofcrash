@@ -25,14 +25,14 @@ pub struct BarrierConfig {
     pub buffer_zone: i32,
     pub push_factor: i32,
     pub overlay_color: OverlayColor,
-    pub overlay_alpha: u8,  // 0-255, where 255 is opaque, 0 is transparent
+    pub overlay_alpha: u8, // 0-255, where 255 is opaque, 0 is transparent
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OverlayColor {
-    pub r: u8,  // Red component (0-255)
-    pub g: u8,  // Green component (0-255) 
-    pub b: u8,  // Blue component (0-255)
+    pub r: u8, // Red component (0-255)
+    pub g: u8, // Green component (0-255)
+    pub b: u8, // Blue component (0-255)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,30 +64,30 @@ impl Default for Config {
             },
             barrier: BarrierConfig {
                 x: 0,
-                y: 1080,       // Bottom edge of screen for 1080p
+                y: 1080, // Bottom edge of screen for 1080p
                 width: 200,
                 height: 40,
                 buffer_zone: 20,
                 push_factor: 50,
                 overlay_color: OverlayColor {
-                    r: 255,    // Red
-                    g: 0,      // Green
-                    b: 0,      // Blue
+                    r: 255, // Red
+                    g: 0,   // Green
+                    b: 0,   // Blue
                 },
-                overlay_alpha: 200,  // Semi-transparent red
+                overlay_alpha: 200, // Semi-transparent red
             },
             hud: HudConfig {
                 enabled: true,
                 position: HudPosition::TopRight,
                 font_size: 12,
                 background_color: OverlayColor {
-                    r: 0,      // Black background
+                    r: 0, // Black background
                     g: 0,
                     b: 0,
                 },
-                background_alpha: 180,  // Semi-transparent
+                background_alpha: 180, // Semi-transparent
                 text_color: OverlayColor {
-                    r: 255,    // White text
+                    r: 255, // White text
                     g: 255,
                     b: 255,
                 },
@@ -98,12 +98,14 @@ impl Default for Config {
 }
 
 impl Config {
-    pub fn load_from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn load_from_file<P: AsRef<std::path::Path>>(
+        path: P,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let content = std::fs::read_to_string(path)?;
         let config: Config = ron::from_str(&content)?;
         Ok(config)
     }
-    
+
     pub fn load_or_create(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
         match std::fs::read_to_string(path) {
             Ok(content) => {
@@ -127,7 +129,7 @@ impl Config {
 
 pub fn vk_code_from_string(key: &str) -> Option<u32> {
     use winapi::um::winuser::*;
-    
+
     match key.to_uppercase().as_str() {
         "F1" => Some(VK_F1 as u32),
         "F2" => Some(VK_F2 as u32),

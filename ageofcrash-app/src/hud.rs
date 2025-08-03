@@ -189,7 +189,7 @@ fn create_hud_window(config: &HudConfig) -> Result<HWND, Box<dyn std::error::Err
 
     let hwnd = unsafe {
         CreateWindowExW(
-            WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
+            WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_COMPOSITED,
             class_name.as_ptr(),
             window_title.as_ptr(),
             WS_POPUP,
@@ -257,6 +257,12 @@ unsafe extern "system" fn hud_window_proc(
             let mut rect: RECT = std::mem::zeroed();
             GetClientRect(hwnd, &mut rect);
 
+            // Create memory DC for double buffering
+            let mem_dc = CreateCompatibleDC(hdc);
+            let bitmap =
+                CreateCompatibleBitmap(hdc, rect.right - rect.left, rect.bottom - rect.top);
+            let old_bitmap = SelectObject(mem_dc, bitmap as *mut _);
+
             // Create fonts and brushes
             let font = CreateFontW(
                 14,
@@ -275,22 +281,40 @@ unsafe extern "system" fn hud_window_proc(
                 ptr::null(),
             );
 
-            let old_font = SelectObject(hdc, font as *mut _);
+            let old_font = SelectObject(mem_dc, font as *mut _);
 
-            // Set text colors
-            SetTextColor(hdc, RGB(255, 255, 255)); // White text
-            SetBkMode(hdc, TRANSPARENT as i32);
+            // Set text colors on memory DC
+            SetTextColor(mem_dc, RGB(255, 255, 255)); // White text
+            SetBkMode(mem_dc, TRANSPARENT as i32);
 
-            // Draw background
+            // Draw background on memory DC
             let bg_brush = CreateSolidBrush(RGB(0, 0, 0)); // Black background
-            FillRect(hdc, &rect, bg_brush);
+            FillRect(mem_dc, &rect, bg_brush);
             DeleteObject(bg_brush as *mut _);
 
-            // Draw HUD content
-            draw_hud_content(hdc, &rect);
+            // Draw HUD content on memory DC
+            draw_hud_content(mem_dc, &rect);
 
-            SelectObject(hdc, old_font);
+            // Copy from memory DC to screen DC (this reduces flicker)
+            BitBlt(
+                hdc,
+                0,
+                0,
+                rect.right - rect.left,
+                rect.bottom - rect.top,
+                mem_dc,
+                0,
+                0,
+                SRCCOPY,
+            );
+
+            // Clean up
+            SelectObject(mem_dc, old_font);
+            SelectObject(mem_dc, old_bitmap);
             DeleteObject(font as *mut _);
+            DeleteObject(bitmap as *mut _);
+            DeleteDC(mem_dc);
+
             EndPaint(hwnd, &ps);
             0
         }
@@ -434,6 +458,7 @@ unsafe fn draw_hud_content(hdc: HDC, rect: &RECT) {
 // Global HUD state for access from window procedure
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 pub struct HudState {
     pub enabled: bool,
@@ -445,6 +470,7 @@ pub struct HudState {
     pub push_factor: i32,
     pub mouse_x: i32,
     pub mouse_y: i32,
+    pub last_refresh: Instant,
 }
 
 lazy_static::lazy_static! {
@@ -458,6 +484,7 @@ lazy_static::lazy_static! {
         push_factor: 0,
         mouse_x: 0,
         mouse_y: 0,
+        last_refresh: Instant::now(),
     }));
 }
 
@@ -482,26 +509,35 @@ pub fn update_global_hud_state(
 }
 
 pub fn update_mouse_position(x: i32, y: i32) {
+    const REFRESH_INTERVAL: Duration = Duration::from_millis(33); // ~30 FPS
+
     if let Ok(mut state) = HUD_STATE.lock() {
         state.mouse_x = x;
         state.mouse_y = y;
+
+        // Only refresh if enough time has passed since last refresh
+        let now = Instant::now();
+        if now.duration_since(state.last_refresh) >= REFRESH_INTERVAL {
+            state.last_refresh = now;
+            drop(state); // Release lock before calling refresh
+            refresh_hud_windows();
+        }
     }
-    
-    // Find and refresh any HUD windows
-    refresh_hud_windows();
 }
 
 fn refresh_hud_windows() {
     unsafe {
-        // Find the HUD window by class name and refresh it
+        // Find the HUD window by class name and refresh it efficiently
         let class_name: Vec<u16> = std::ffi::OsStr::new("AgeOfCrashHUD")
             .encode_wide()
             .chain(std::iter::once(0))
             .collect();
-        
+
         let hwnd = FindWindowW(class_name.as_ptr(), ptr::null());
         if !hwnd.is_null() {
+            // Use a more efficient invalidation
             InvalidateRect(hwnd, ptr::null(), FALSE);
+            // Don't call UpdateWindow here - let the message loop handle it
         }
     }
 }
