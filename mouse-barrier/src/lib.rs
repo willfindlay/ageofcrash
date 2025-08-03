@@ -1,7 +1,9 @@
 use std::mem;
 use std::ptr;
-use std::sync::atomic::{AtomicI32, AtomicPtr, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::thread;
+use std::time::Duration;
 use tracing::{info, warn};
 use winapi::shared::minwindef::{LPARAM, LRESULT, TRUE, UINT, WPARAM};
 use winapi::shared::windef::{HWND, POINT, RECT};
@@ -19,7 +21,11 @@ static KEYBOARD_HOOK_HANDLE: AtomicPtr<winapi::shared::windef::HHOOK__> =
     AtomicPtr::new(std::ptr::null_mut());
 static MOUSE_HOOK_HANDLE: AtomicPtr<winapi::shared::windef::HHOOK__> =
     AtomicPtr::new(std::ptr::null_mut());
-static LAST_IN_BARRIER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static LAST_IN_BARRIER: AtomicBool = AtomicBool::new(false);
+static MIDDLE_BUTTON_MONITORING: AtomicBool = AtomicBool::new(false);
+static MIDDLE_MOUSE_DOWN: AtomicBool = AtomicBool::new(false);
+static HOOK_INSTALL_REQUESTED: AtomicBool = AtomicBool::new(false);
+static HOOK_UNINSTALL_REQUESTED: AtomicBool = AtomicBool::new(false);
 static OVERLAY_WINDOWS: [AtomicPtr<winapi::shared::windef::HWND__>; 4] = [
     AtomicPtr::new(std::ptr::null_mut()),
     AtomicPtr::new(std::ptr::null_mut()),
@@ -122,39 +128,28 @@ impl MouseBarrier {
             }
         }
 
-        unsafe {
-            let hook = SetWindowsHookExW(
-                WH_MOUSE_LL,
-                Some(mouse_proc),
-                GetModuleHandleW(std::ptr::null()),
-                0,
-            );
+        // Start middle button monitoring that controls hook installation
+        MIDDLE_BUTTON_MONITORING.store(true, Ordering::Release);
+        thread::spawn(move || {
+            monitor_middle_button_and_control_hook();
+        });
 
-            if hook.is_null() {
-                return Err(format!("Failed to set mouse hook: {}", GetLastError()));
-            }
-
-            MOUSE_HOOK_HANDLE.store(hook, Ordering::Release);
-        }
+        // Install main mouse hook initially
+        install_mouse_hook()?;
 
         Ok(())
     }
 
     pub fn disable(&mut self) -> Result<(), String> {
-        let hook = MOUSE_HOOK_HANDLE.swap(std::ptr::null_mut(), Ordering::AcqRel);
-
-        if !hook.is_null() {
-            let state_lock = MOUSE_BARRIER_STATE.get().unwrap();
-            if let Some(ref mut state) = *state_lock.lock().unwrap() {
-                state.enabled = false;
-            }
-
-            unsafe {
-                if UnhookWindowsHookEx(hook) == 0 {
-                    return Err(format!("Failed to unhook mouse: {}", GetLastError()));
-                }
-            }
+        // Stop middle button monitoring
+        MIDDLE_BUTTON_MONITORING.store(false, Ordering::Release);
+        
+        let state_lock = MOUSE_BARRIER_STATE.get().unwrap();
+        if let Some(ref mut state) = *state_lock.lock().unwrap() {
+            state.enabled = false;
         }
+
+        uninstall_mouse_hook()?;
 
         // Destroy overlay windows
         for atomic_ptr in &OVERLAY_WINDOWS {
@@ -375,6 +370,97 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARA
     }
 
     CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam)
+}
+
+fn install_mouse_hook() -> Result<(), String> {
+    let current_hook = MOUSE_HOOK_HANDLE.load(Ordering::Acquire);
+    if !current_hook.is_null() {
+        return Ok(());
+    }
+
+    unsafe {
+        let hook = SetWindowsHookExW(
+            WH_MOUSE_LL,
+            Some(mouse_proc),
+            GetModuleHandleW(std::ptr::null()),
+            0,
+        );
+
+        if hook.is_null() {
+            return Err(format!("Failed to set mouse hook: {}", GetLastError()));
+        }
+
+        MOUSE_HOOK_HANDLE.store(hook, Ordering::Release);
+    }
+    Ok(())
+}
+
+fn uninstall_mouse_hook() -> Result<(), String> {
+    let hook = MOUSE_HOOK_HANDLE.swap(std::ptr::null_mut(), Ordering::AcqRel);
+    
+    if !hook.is_null() {
+        unsafe {
+            if UnhookWindowsHookEx(hook) == 0 {
+                return Err(format!("Failed to unhook mouse: {}", GetLastError()));
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn process_hook_requests() {
+    // Check for uninstall requests
+    if HOOK_UNINSTALL_REQUESTED.swap(false, Ordering::AcqRel) {
+        if let Err(e) = uninstall_mouse_hook() {
+            warn!("Failed to uninstall mouse hook: {}", e);
+        } else {
+            info!("Uninstalled mouse hook due to middle button press");
+        }
+    }
+    
+    // Check for install requests
+    if HOOK_INSTALL_REQUESTED.swap(false, Ordering::AcqRel) {
+        if let Err(e) = install_mouse_hook() {
+            warn!("Failed to reinstall mouse hook: {}", e);
+        } else {
+            info!("Reinstalled mouse hook after middle button release");
+        }
+    }
+}
+
+fn monitor_middle_button_and_control_hook() {
+    let mut last_middle_state = false;
+    
+    while MIDDLE_BUTTON_MONITORING.load(Ordering::Acquire) {
+        unsafe {
+            let middle_pressed = GetAsyncKeyState(VK_MBUTTON) & 0x8000u16 as i16 != 0;
+            
+            // Detect state changes
+            if middle_pressed != last_middle_state {
+                if middle_pressed {
+                    // Middle button pressed - request hook uninstall
+                    HOOK_UNINSTALL_REQUESTED.store(true, Ordering::Release);
+                    info!("Requested mouse hook uninstall due to middle button press");
+                } else {
+                    // Middle button released - request hook reinstall if barrier is enabled
+                    if let Some(state_lock) = MOUSE_BARRIER_STATE.get() {
+                        if let Ok(state_guard) = state_lock.lock() {
+                            if let Some(ref state) = *state_guard {
+                                if state.enabled {
+                                    HOOK_INSTALL_REQUESTED.store(true, Ordering::Release);
+                                    info!("Requested mouse hook reinstall after middle button release");
+                                }
+                            }
+                        }
+                    }
+                }
+                last_middle_state = middle_pressed;
+            }
+            
+            MIDDLE_MOUSE_DOWN.store(middle_pressed, Ordering::Relaxed);
+        }
+        thread::sleep(Duration::from_millis(5)); // 200Hz polling for responsiveness
+    }
 }
 
 fn point_in_rect(point: &POINT, rect: &RECT) -> bool {
