@@ -1,4 +1,4 @@
-use crate::config::{HotkeyConfig, vk_code_from_string};
+use crate::config::{vk_code_from_string, HotkeyConfig};
 use winapi::um::winuser::*;
 
 pub struct HotkeyDetector {
@@ -12,7 +12,7 @@ pub struct HotkeyDetector {
 impl HotkeyDetector {
     pub fn new(config: HotkeyConfig) -> Option<Self> {
         let target_vk = vk_code_from_string(&config.key)?;
-        
+
         Some(Self {
             config,
             target_vk,
@@ -45,15 +45,15 @@ impl HotkeyDetector {
 
     pub fn update_config(&mut self, new_config: HotkeyConfig) -> Option<()> {
         let target_vk = vk_code_from_string(&new_config.key)?;
-        
+
         self.config = new_config;
         self.target_vk = target_vk;
-        
+
         // Reset modifier states to avoid confusion
         self.ctrl_pressed = false;
         self.alt_pressed = false;
         self.shift_pressed = false;
-        
+
         Some(())
     }
 
