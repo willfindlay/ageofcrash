@@ -1,5 +1,33 @@
 # Age of Crash Mouse Barrier - Development Guide
 
+## Getting Started - READ FIRST
+
+**IMPORTANT**: Before making any code changes, always inspect the project structure to understand the architecture:
+
+1. **Inspect the main files**:
+   - `ageofcrash-app/src/main.rs` - Contains the main message loop and application state
+   - `mouse-barrier/src/lib.rs` - Core Windows hook implementation
+   - `ageofcrash-app/src/hotkey.rs` - Hotkey detection patterns
+   - `ageofcrash-app/src/config.rs` - Configuration management
+
+2. **Understand the threading model**:
+   - **Main thread**: Runs Windows message loop, handles hook installation/removal
+   - **Background threads**: Used for monitoring (config watching, middle mouse detection)
+   - **Hook callbacks**: Execute in hook thread context, must be fast
+   - **Thread affinity**: Windows hooks must be managed from the main thread
+
+3. **Key architectural patterns**:
+   - Flag-based communication between threads using atomic variables
+   - Hook operations processed in main message loop via `process_*_requests()` functions
+   - State management through global static variables with proper synchronization
+   - Event-driven design using Windows message pump
+
+4. **Common pitfalls to avoid**:
+   - Never install/uninstall hooks from background threads (causes deadlocks)
+   - Don't perform blocking operations in hook callbacks
+   - Always use atomic operations for cross-thread communication
+   - Consider hook interference with game input systems
+
 ## Project Overview
 
 Age of Crash Mouse Barrier is a Windows application that prevents the mouse cursor from entering a configurable rectangular area on the screen. It was specifically designed to work around a crash bug in Age of Empires IV that occurs when the mouse enters the bottom-left corner.
@@ -132,6 +160,14 @@ The app uses RON (Rusty Object Notation) for configuration:
 1. Edit barrier logic in `mouse-barrier/src/lib.rs`
 2. Test with different `push_factor` values
 3. Consider edge cases (multi-monitor setups)
+
+### Adding input monitoring (e.g., middle mouse detection)
+**Example implementation**: Middle mouse monitoring for temporary barrier disable
+1. **Background thread**: Use `GetAsyncKeyState` polling to detect input state
+2. **Atomic flags**: Set `HOOK_*_REQUESTED` flags when state changes
+3. **Main thread processing**: Add `process_*_requests()` function called from message loop
+4. **Hook management**: Use same `install_*_hook()`/`uninstall_*_hook()` functions as hotkey system
+5. **Pattern**: Never manage hooks from background threads - always use flag-based requests
 
 ### Debugging
 - Enable trace logging: `RUST_LOG=trace cargo run`

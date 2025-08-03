@@ -7,7 +7,7 @@ use config::Config;
 use config_watcher::{ConfigEvent, ConfigWatcher};
 use hotkey::HotkeyDetector;
 use hud::Hud;
-use mouse_barrier::{set_mouse_position_callback, KeyboardHook, MouseBarrier};
+use mouse_barrier::{process_hook_requests, set_mouse_position_callback, KeyboardHook, MouseBarrier};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use tracing::{error, info, warn, Level};
@@ -305,6 +305,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Windows message loop with integrated event processing
     unsafe {
         loop {
+            // Process hook requests from middle mouse monitoring thread
+            process_hook_requests();
+            
             // Process all pending application events first
             while let Ok(event) = rx.try_recv() {
                 match event {
