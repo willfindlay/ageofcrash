@@ -772,9 +772,7 @@ fn create_overlay_windows() -> Result<Vec<HWND>, String> {
             let buffer_bottom = barrier_bottom + scaled_buffer;
 
             // Create 4 windows - top, bottom, left, right
-            // Clamp to screen boundaries to avoid covering taskbar
-            let max_bottom = screen_height - 60; // Leave space for taskbar
-            let clamped_buffer_bottom = buffer_bottom.min(max_bottom);
+            let clamped_buffer_bottom = buffer_bottom.min(screen_height);
             let clamped_buffer_top = buffer_top.max(0);
             let clamped_buffer_left = buffer_left.max(0);
             let clamped_buffer_right = buffer_right.min(screen_width);
