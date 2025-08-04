@@ -42,6 +42,14 @@ Keeping both documentation files current ensures future AI assistants and develo
    - Always detect screen metrics dynamically using appropriate WinAPI calls (`GetSystemMetrics`, `EnumDisplaySettings`, etc.)
    - **CRITICAL DPI SCALING**: Windows APIs mix coordinate systems - some use logical DPI-scaled coordinates while others use physical pixels. Must convert between them to avoid positioning bugs (see DPI Scaling section below)
 
+5. **Consult the git commit history**:
+   - The commit history is an **excellent resource** for understanding project evolution and context
+   - Each commit includes detailed technical explanations, implementation decisions, and known limitations
+   - Use `git log --oneline` for quick overview, `git show <commit>` for detailed information
+   - Commits follow Conventional Commits format with comprehensive technical details
+   - Search commit messages: `git log --grep="keyword"` to find related changes
+   - Understanding previous solutions helps avoid repeating past mistakes and builds on existing patterns
+
 ## Project Overview
 
 Age of Crash Mouse Barrier is a Windows application that prevents the mouse cursor from entering a configurable rectangular area on the screen. It was specifically designed to work around a crash bug in Age of Empires IV that occurs when the mouse enters the bottom-left corner.
