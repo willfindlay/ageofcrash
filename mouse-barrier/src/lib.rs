@@ -109,14 +109,14 @@ impl MouseBarrier {
             let height = GetSystemMetrics(SM_CYSCREEN);
             SCREEN_WIDTH.store(width, Ordering::Relaxed);
             SCREEN_HEIGHT.store(height, Ordering::Relaxed);
-            
+
             // Cache physical screen resolution for coordinate scaling using EnumDisplaySettings
             let mut dev_mode: DEVMODEW = std::mem::zeroed();
             dev_mode.dmSize = std::mem::size_of::<DEVMODEW>() as u16;
-            
+
             let physical_width;
             let physical_height;
-            
+
             if EnumDisplaySettingsW(std::ptr::null(), ENUM_CURRENT_SETTINGS, &mut dev_mode) != 0 {
                 physical_width = dev_mode.dmPelsWidth as i32;
                 physical_height = dev_mode.dmPelsHeight as i32;
@@ -125,12 +125,14 @@ impl MouseBarrier {
                 physical_width = width;
                 physical_height = height;
             }
-            
+
             PHYSICAL_SCREEN_WIDTH.store(physical_width, Ordering::Relaxed);
             PHYSICAL_SCREEN_HEIGHT.store(physical_height, Ordering::Relaxed);
-            
-            info!("Screen metrics initialized - Logical: {}x{}, Physical: {}x{}", 
-                  width, height, physical_width, physical_height);
+
+            info!(
+                "Screen metrics initialized - Logical: {}x{}, Physical: {}x{}",
+                width, height, physical_width, physical_height
+            );
         }
 
         // Update the global overlay color
