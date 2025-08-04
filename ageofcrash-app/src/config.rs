@@ -32,6 +32,28 @@ pub struct BarrierConfig {
     pub audio_feedback: AudioFeedbackConfig,
 }
 
+impl BarrierConfig {
+    pub fn validate(&self) -> Result<(), Box<dyn std::error::Error>> {
+        if self.width <= 0 {
+            return Err(format!("barrier width must be > 0, got {}", self.width).into());
+        }
+        if self.height <= 0 {
+            return Err(format!("barrier height must be > 0, got {}", self.height).into());
+        }
+        if self.buffer_zone < 0 {
+            return Err(
+                format!("barrier buffer_zone must be >= 0, got {}", self.buffer_zone).into(),
+            );
+        }
+        if self.push_factor < 0 {
+            return Err(
+                format!("barrier push_factor must be >= 0, got {}", self.push_factor).into(),
+            );
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioFeedbackConfig {
     pub on_barrier_hit: AudioOption,
@@ -84,6 +106,11 @@ impl Default for Config {
 }
 
 impl Config {
+    pub fn validate(&self) -> Result<(), Box<dyn std::error::Error>> {
+        self.barrier.validate()?;
+        Ok(())
+    }
+
     pub fn load_from_file<P: AsRef<std::path::Path>>(
         path: P,
     ) -> Result<Self, Box<dyn std::error::Error>> {
@@ -96,6 +123,7 @@ impl Config {
                 Profile::Default,
             ))
             .extract()?;
+        config.validate()?;
         Ok(config)
     }
 
@@ -123,6 +151,7 @@ impl Config {
 
         // Extract the configuration
         let config: Config = figment.extract()?;
+        config.validate()?;
 
         // Create default config file if it doesn't exist
         if !user_config_exists {
@@ -638,14 +667,14 @@ mod tests {
 
     fn arb_barrier_config() -> impl Strategy<Value = BarrierConfig> {
         (
-            any::<i32>(),
-            any::<i32>(),
-            any::<i32>(),
-            any::<i32>(),
-            any::<i32>(),
-            any::<i32>(),
+            any::<i32>(), // x: any position is valid
+            any::<i32>(), // y: any position is valid
+            1..i32::MAX,  // width: must be > 0
+            1..i32::MAX,  // height: must be > 0
+            0..i32::MAX,  // buffer_zone: must be >= 0
+            0..i32::MAX,  // push_factor: must be >= 0
             arb_overlay_color(),
-            any::<u8>(),
+            any::<u8>(), // overlay_alpha: u8 is automatically valid
             arb_audio_feedback_config(),
         )
             .prop_map(
@@ -721,6 +750,71 @@ mod tests {
             arb_barrier_config(),
             arb_hud_config(),
             any::<bool>(),
+        )
+            .prop_map(|(hotkey, barrier, hud, debug)| Config {
+                hotkey,
+                barrier,
+                hud,
+                debug,
+            })
+    }
+
+    // Generators for invalid values (for testing validation failures)
+    fn arb_invalid_barrier_config() -> impl Strategy<Value = BarrierConfig> {
+        (
+            any::<i32>(), // x: any position is valid
+            any::<i32>(), // y: any position is valid
+            prop_oneof![
+                ..=0i32,     // invalid width: <= 0
+                1..i32::MAX, // valid width (some configs should still be valid)
+            ],
+            prop_oneof![
+                ..=0i32,     // invalid height: <= 0
+                1..i32::MAX, // valid height (some configs should still be valid)
+            ],
+            prop_oneof![
+                i32::MIN..-1, // invalid buffer_zone: < 0
+                0..i32::MAX,  // valid buffer_zone (some configs should still be valid)
+            ],
+            prop_oneof![
+                i32::MIN..-1, // invalid push_factor: < 0
+                0..i32::MAX,  // valid push_factor (some configs should still be valid)
+            ],
+            arb_overlay_color(),
+            any::<u8>(), // overlay_alpha: u8 is automatically valid
+            arb_audio_feedback_config(),
+        )
+            .prop_map(
+                |(
+                    x,
+                    y,
+                    width,
+                    height,
+                    buffer_zone,
+                    push_factor,
+                    overlay_color,
+                    overlay_alpha,
+                    audio_feedback,
+                )| BarrierConfig {
+                    x,
+                    y,
+                    width,
+                    height,
+                    buffer_zone,
+                    push_factor,
+                    overlay_color,
+                    overlay_alpha,
+                    audio_feedback,
+                },
+            )
+    }
+
+    fn arb_invalid_config() -> impl Strategy<Value = Config> {
+        (
+            arb_hotkey_config(),          // hotkey: always valid (no validation needed)
+            arb_invalid_barrier_config(), // barrier: may have invalid values
+            arb_hud_config(),             // hud: always valid (no validation needed)
+            any::<bool>(),                // debug: always valid
         )
             .prop_map(|(hotkey, barrier, hud, debug)| Config {
                 hotkey,
@@ -879,6 +973,61 @@ mod tests {
             prop_assert_eq!(layered_config.barrier.overlay_color.r, default_config.barrier.overlay_color.r);
             prop_assert_eq!(layered_config.barrier.overlay_color.g, default_config.barrier.overlay_color.g);
             prop_assert_eq!(layered_config.barrier.overlay_color.b, default_config.barrier.overlay_color.b);
+        }
+
+        #[test]
+        fn prop_valid_config_validation_passes(config in arb_config()) {
+            // All configs generated by arb_config should pass validation
+            prop_assert!(config.validate().is_ok());
+        }
+
+        #[test]
+        fn prop_invalid_config_validation_fails(config in arb_invalid_config()) {
+            // Check if this config has any invalid values that should cause validation to fail
+            let has_invalid_width = config.barrier.width <= 0;
+            let has_invalid_height = config.barrier.height <= 0;
+            let has_invalid_buffer_zone = config.barrier.buffer_zone < 0;
+            let has_invalid_push_factor = config.barrier.push_factor < 0;
+
+            let should_fail = has_invalid_width || has_invalid_height || has_invalid_buffer_zone || has_invalid_push_factor;
+
+            let validation_result = config.validate();
+
+            if should_fail {
+                prop_assert!(validation_result.is_err(), "Expected validation to fail for invalid config");
+            } else {
+                prop_assert!(validation_result.is_ok(), "Expected validation to pass for valid config");
+            }
+        }
+
+        #[test]
+        fn prop_config_loading_rejects_invalid(config in arb_invalid_config()) {
+            // Check if this config should fail validation
+            let has_invalid_width = config.barrier.width <= 0;
+            let has_invalid_height = config.barrier.height <= 0;
+            let has_invalid_buffer_zone = config.barrier.buffer_zone < 0;
+            let has_invalid_push_factor = config.barrier.push_factor < 0;
+
+            let should_fail = has_invalid_width || has_invalid_height || has_invalid_buffer_zone || has_invalid_push_factor;
+
+            if should_fail {
+                // Serialize the invalid config to RON
+                let ron_string = match ron::to_string(&config) {
+                    Ok(s) => s,
+                    Err(_) => return Ok(()), // Skip if serialization fails
+                };
+
+                // Attempt to deserialize and validate - this should fail
+                let load_result: Result<Config, Box<dyn std::error::Error>> =
+                    ron::from_str(&ron_string)
+                        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+                        .and_then(|parsed_config: Config| {
+                            parsed_config.validate()?;
+                            Ok(parsed_config)
+                        });
+
+                prop_assert!(load_result.is_err(), "Expected config loading to fail for invalid config");
+            }
         }
     }
 }
