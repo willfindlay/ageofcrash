@@ -513,12 +513,12 @@ mod tests {
         assert_eq!(config.overlay_color.g, 0);
         assert_eq!(config.overlay_color.b, 0);
         assert_eq!(config.overlay_alpha, 128);
-        
+
         match config.audio_feedback.on_barrier_hit {
             AudioOption::None => {}
             _ => panic!("Expected None"),
         }
-        
+
         match config.audio_feedback.on_barrier_entry {
             AudioOption::File(path) => assert_eq!(path, "sound.wav"),
             _ => panic!("Expected File"),
@@ -558,8 +558,12 @@ mod tests {
 
     #[test]
     fn test_overlay_color_creation() {
-        let color = OverlayColor { r: 128, g: 64, b: 192 };
-        
+        let color = OverlayColor {
+            r: 128,
+            g: 64,
+            b: 192,
+        };
+
         assert_eq!(color.r, 128);
         assert_eq!(color.g, 64);
         assert_eq!(color.b, 192);
@@ -629,7 +633,7 @@ mod tests {
         assert_eq!(vk_code_from_string("F1"), Some(VK_F1 as u32));
         assert_eq!(vk_code_from_string("F5"), Some(VK_F5 as u32));
         assert_eq!(vk_code_from_string("F12"), Some(VK_F12 as u32));
-        
+
         // Test case sensitivity
         assert_eq!(vk_code_from_string("f1"), Some(VK_F1 as u32));
         assert_eq!(vk_code_from_string("f12"), Some(VK_F12 as u32));
@@ -641,7 +645,7 @@ mod tests {
         assert_eq!(vk_code_from_string("A"), Some(0x41));
         assert_eq!(vk_code_from_string("M"), Some(0x4D));
         assert_eq!(vk_code_from_string("Z"), Some(0x5A));
-        
+
         // Test lowercase (should still work)
         assert_eq!(vk_code_from_string("a"), Some(0x41));
         assert_eq!(vk_code_from_string("z"), Some(0x5A));
@@ -677,13 +681,13 @@ mod tests {
     #[test]
     fn test_config_serialization_roundtrip() {
         let original = Config::default();
-        
+
         // Serialize to RON
         let ron_string = ron::to_string(&original).unwrap();
-        
+
         // Deserialize back
         let restored: Config = ron::from_str(&ron_string).unwrap();
-        
+
         // Verify key fields are preserved
         assert_eq!(restored.hotkey.ctrl, original.hotkey.ctrl);
         assert_eq!(restored.hotkey.key, original.hotkey.key);
@@ -697,7 +701,7 @@ mod tests {
     fn test_config_clone() {
         let original = Config::default();
         let cloned = original.clone();
-        
+
         // Verify they have the same values
         assert_eq!(cloned.hotkey.ctrl, original.hotkey.ctrl);
         assert_eq!(cloned.hotkey.key, original.hotkey.key);
@@ -714,7 +718,7 @@ mod tests {
             AudioOption::None => {}
             _ => panic!("Expected None variant"),
         }
-        
+
         // Test File variant
         let file_option = AudioOption::File("test.wav".to_string());
         match file_option {
@@ -731,7 +735,7 @@ mod tests {
             HudPosition::BottomLeft,
             HudPosition::BottomRight,
         ];
-        
+
         // Test that all variants can be created and are unique
         for (i, pos1) in positions.iter().enumerate() {
             for (j, pos2) in positions.iter().enumerate() {
@@ -747,7 +751,7 @@ mod tests {
     #[test]
     fn test_default_config_values() {
         let config = Config::default();
-        
+
         // Test that default values are reasonable
         assert!(config.hotkey.ctrl); // Default should require Ctrl
         assert_eq!(config.hotkey.key, "F12"); // Default key should be F12

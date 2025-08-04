@@ -82,7 +82,7 @@ mod tests {
     fn test_hotkey_detector_creation_valid_key() {
         let config = create_test_config(true, false, false, "F12");
         let detector = HotkeyDetector::new(config.clone());
-        
+
         assert!(detector.is_some());
         let detector = detector.unwrap();
         assert_eq!(detector.config, config);
@@ -96,7 +96,7 @@ mod tests {
     fn test_hotkey_detector_creation_invalid_key() {
         let config = create_test_config(true, false, false, "INVALID_KEY");
         let detector = HotkeyDetector::new(config);
-        
+
         assert!(detector.is_none());
     }
 
@@ -184,7 +184,7 @@ mod tests {
 
         // Press Ctrl
         detector.handle_key(VK_CONTROL as u32, true);
-        
+
         // Press F12 - should trigger hotkey
         let result = detector.handle_key(VK_F12 as u32, true);
         assert!(result);
@@ -199,7 +199,7 @@ mod tests {
         detector.handle_key(VK_CONTROL as u32, true);
         detector.handle_key(VK_MENU as u32, true);
         detector.handle_key(VK_SHIFT as u32, true);
-        
+
         // Press A - should trigger hotkey
         let result = detector.handle_key(0x41, true); // 'A' key
         assert!(result);
@@ -212,7 +212,7 @@ mod tests {
 
         // Press Alt instead of Ctrl
         detector.handle_key(VK_MENU as u32, true);
-        
+
         // Press F12 - should NOT trigger hotkey
         let result = detector.handle_key(VK_F12 as u32, true);
         assert!(!result);
@@ -225,7 +225,7 @@ mod tests {
 
         // Press only Ctrl (missing Alt)
         detector.handle_key(VK_CONTROL as u32, true);
-        
+
         // Press F12 - should NOT trigger hotkey
         let result = detector.handle_key(VK_F12 as u32, true);
         assert!(!result);
@@ -239,7 +239,7 @@ mod tests {
         // Press Ctrl and Shift (extra modifier)
         detector.handle_key(VK_CONTROL as u32, true);
         detector.handle_key(VK_SHIFT as u32, true);
-        
+
         // Press F12 - should NOT trigger hotkey because Shift is pressed but not required
         let result = detector.handle_key(VK_F12 as u32, true);
         assert!(!result);
@@ -252,7 +252,7 @@ mod tests {
 
         // Press Ctrl
         detector.handle_key(VK_CONTROL as u32, true);
-        
+
         // Release F12 - should NOT trigger hotkey
         let result = detector.handle_key(VK_F12 as u32, false);
         assert!(!result);
@@ -265,7 +265,7 @@ mod tests {
 
         // Press Ctrl
         detector.handle_key(VK_CONTROL as u32, true);
-        
+
         // Press F11 instead of F12 - should NOT trigger hotkey
         let result = detector.handle_key(VK_F11 as u32, true);
         assert!(!result);
@@ -278,11 +278,11 @@ mod tests {
 
         let new_config = create_test_config(false, true, false, "F1");
         let result = detector.update_config(new_config.clone());
-        
+
         assert!(result.is_some());
         assert_eq!(detector.config, new_config);
         assert_eq!(detector.target_vk, VK_F1 as u32);
-        
+
         // Modifier states should be reset
         assert!(!detector.ctrl_pressed);
         assert!(!detector.alt_pressed);
@@ -296,7 +296,7 @@ mod tests {
 
         let new_config = create_test_config(false, true, false, "INVALID_KEY");
         let result = detector.update_config(new_config);
-        
+
         assert!(result.is_none());
         // Config should remain unchanged
         assert_eq!(detector.config, initial_config);
@@ -317,7 +317,7 @@ mod tests {
         // Update config
         let new_config = create_test_config(false, true, false, "F1");
         detector.update_config(new_config);
-        
+
         // Modifier states should be reset
         assert!(!detector.ctrl_pressed);
         assert!(!detector.alt_pressed);
@@ -336,12 +336,10 @@ mod tests {
 
     #[test]
     fn test_alphabet_keys() {
-        for (letter, vk_code) in [
-            ("A", 0x41), ("B", 0x42), ("C", 0x43), ("Z", 0x5A)
-        ] {
+        for (letter, vk_code) in [("A", 0x41), ("B", 0x42), ("C", 0x43), ("Z", 0x5A)] {
             let config = create_test_config(true, false, false, letter);
             let mut detector = HotkeyDetector::new(config).unwrap();
-            
+
             detector.handle_key(VK_CONTROL as u32, true);
             let result = detector.handle_key(vk_code, true);
             assert!(result, "Hotkey should trigger for {}", letter);
@@ -351,11 +349,14 @@ mod tests {
     #[test]
     fn test_function_keys() {
         for (key_name, vk_code) in [
-            ("F1", VK_F1), ("F5", VK_F5), ("F10", VK_F10), ("F12", VK_F12)
+            ("F1", VK_F1),
+            ("F5", VK_F5),
+            ("F10", VK_F10),
+            ("F12", VK_F12),
         ] {
             let config = create_test_config(true, false, false, key_name);
             let mut detector = HotkeyDetector::new(config).unwrap();
-            
+
             detector.handle_key(VK_CONTROL as u32, true);
             let result = detector.handle_key(vk_code as u32, true);
             assert!(result, "Hotkey should trigger for {}", key_name);
@@ -364,12 +365,10 @@ mod tests {
 
     #[test]
     fn test_number_keys() {
-        for (digit, vk_code) in [
-            ("0", 0x30), ("1", 0x31), ("5", 0x35), ("9", 0x39)
-        ] {
+        for (digit, vk_code) in [("0", 0x30), ("1", 0x31), ("5", 0x35), ("9", 0x39)] {
             let config = create_test_config(true, false, false, digit);
             let mut detector = HotkeyDetector::new(config).unwrap();
-            
+
             detector.handle_key(VK_CONTROL as u32, true);
             let result = detector.handle_key(vk_code, true);
             assert!(result, "Hotkey should trigger for {}", digit);

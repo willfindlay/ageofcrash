@@ -1001,7 +1001,7 @@ mod tests {
 
     #[test]
     fn test_push_point_out_of_rect_basic() {
-        // Simple test case - mock screen size 
+        // Simple test case - mock screen size
         SCREEN_WIDTH.store(1920, Ordering::Relaxed);
         SCREEN_HEIGHT.store(1080, Ordering::Relaxed);
 
@@ -1125,9 +1125,9 @@ mod tests {
 
         let expected_rect = RECT {
             left: x,
-            top: y - height, // top = 500 - 100 = 400
+            top: y - height,  // top = 500 - 100 = 400
             right: x + width, // right = 100 + 200 = 300
-            bottom: y, // bottom = 500
+            bottom: y,        // bottom = 500
         };
 
         assert_eq!(expected_rect.left, 100);

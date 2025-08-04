@@ -1,0 +1,124 @@
+name: Code Quality
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  quality-checks:
+    name: Code Quality Checks
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: stable
+        components: rustfmt, clippy
+        
+    - name: Cache Cargo dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-quality-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-quality-
+          ${{ runner.os }}-cargo-
+          
+    - name: Check code formatting
+      run: |
+        echo "## Code Formatting Check" >> $GITHUB_STEP_SUMMARY
+        if cargo fmt --all --check; then
+          echo "✅ Code formatting is correct" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ Code formatting issues found" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Run \`cargo fmt\` to fix formatting issues." >> $GITHUB_STEP_SUMMARY
+          exit 1
+        fi
+      shell: bash
+      
+    - name: Run Clippy lints
+      run: |
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "## Clippy Lint Check" >> $GITHUB_STEP_SUMMARY
+        if cargo clippy --all-targets --all-features -- -D warnings; then
+          echo "✅ No clippy warnings found" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ Clippy warnings/errors found" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Fix all clippy issues before merging. Use \`cargo clippy --fix\` when possible." >> $GITHUB_STEP_SUMMARY
+          exit 1
+        fi
+      shell: bash
+      
+    - name: Check compilation
+      run: |
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "## Compilation Check" >> $GITHUB_STEP_SUMMARY
+        if cargo check --all-targets --all-features; then
+          echo "✅ Code compiles successfully" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ Compilation errors found" >> $GITHUB_STEP_SUMMARY
+          exit 1
+        fi
+      shell: bash
+      
+    - name: Check release build
+      run: |
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "## Release Build Check" >> $GITHUB_STEP_SUMMARY
+        if cargo build --release --all-targets; then
+          echo "✅ Release build successful" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ Release build failed" >> $GITHUB_STEP_SUMMARY
+          exit 1
+        fi
+      shell: bash
+      
+    - name: Verify project structure
+      run: |
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "## Project Structure Check" >> $GITHUB_STEP_SUMMARY
+        
+        # Check for required files
+        required_files=("Cargo.toml" "CLAUDE.md" "config.ron" "README.md")
+        for file in "${required_files[@]}"; do
+          if [ -f "$file" ]; then
+            echo "✅ $file exists" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ $file missing" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+        done
+        
+        # Check workspace structure
+        if [ -d "ageofcrash-app" ] && [ -d "mouse-barrier" ]; then
+          echo "✅ Workspace structure correct" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ Invalid workspace structure" >> $GITHUB_STEP_SUMMARY
+          exit 1
+        fi
+        
+        echo "✅ All project structure checks passed" >> $GITHUB_STEP_SUMMARY
+      shell: bash
+      
+    - name: Upload build artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-artifacts
+        path: |
+          target/release/ageofcrash.exe
+          target/release/deps/
+        retention-days: 7

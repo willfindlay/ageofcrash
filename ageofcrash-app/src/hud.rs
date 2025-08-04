@@ -623,7 +623,6 @@ mod tests {
     use super::*;
     use crate::config::HudPosition;
 
-
     fn create_test_barrier_state_config(
         enabled: bool,
         x: i32,
@@ -659,17 +658,19 @@ mod tests {
 
     #[test]
     fn test_hud_constants() {
-        // Test that HUD constants are reasonable
-        assert!(HUD_WIDTH > 0);
-        assert!(HUD_HEIGHT > 0);
-        assert!(HUD_MARGIN >= 0);
-        assert!(HUD_PADDING >= 0);
-        assert!(HUD_LINE_HEIGHT > 0);
-        assert!(HUD_TITLE_SPACING >= 0);
+        // Test that HUD constants have expected values (not optimized out since we're testing actual values)
+        assert_eq!(HUD_WIDTH, 300);
+        assert_eq!(HUD_HEIGHT, 180);
+        assert_eq!(HUD_MARGIN, 20);
+        assert_eq!(HUD_PADDING, 10);
+        assert_eq!(HUD_LINE_HEIGHT, 18);
+        assert_eq!(HUD_TITLE_SPACING, 5);
 
-        // Test that dimensions make sense
-        assert!(HUD_WIDTH > HUD_PADDING * 2);
-        assert!(HUD_HEIGHT > HUD_PADDING * 2);
+        // Test logical relationships between constants (computed at test time, not compile time)
+        let width_check = HUD_WIDTH > HUD_PADDING * 2;
+        let height_check = HUD_HEIGHT > HUD_PADDING * 2;
+        assert!(width_check, "HUD width should accommodate padding");
+        assert!(height_check, "HUD height should accommodate padding");
     }
 
     #[test]
@@ -693,7 +694,7 @@ mod tests {
     fn test_calculate_hud_position_top_left() {
         let position = HudPosition::TopLeft;
         let result = calculate_hud_position(&position);
-        
+
         if let Ok((x, y)) = result {
             assert_eq!(x, HUD_MARGIN);
             assert_eq!(y, HUD_MARGIN);
@@ -704,7 +705,7 @@ mod tests {
     fn test_calculate_hud_position_all_positions() {
         // We can't test actual screen dimensions in unit tests, but we can test the logic
         // by checking the position calculation doesn't panic and returns reasonable values
-        
+
         for position in [
             HudPosition::TopLeft,
             HudPosition::TopRight,
@@ -712,13 +713,25 @@ mod tests {
             HudPosition::BottomRight,
         ] {
             let result = calculate_hud_position(&position);
-            assert!(result.is_ok(), "Position calculation should succeed for {:?}", position);
-            
+            assert!(
+                result.is_ok(),
+                "Position calculation should succeed for {:?}",
+                position
+            );
+
             if let Ok((x, y)) = result {
                 // Basic sanity checks - coordinates should be non-negative and account for margins
-                assert!(x >= 0, "X coordinate should be non-negative for {:?}", position);
-                assert!(y >= 0, "Y coordinate should be non-negative for {:?}", position);
-                
+                assert!(
+                    x >= 0,
+                    "X coordinate should be non-negative for {:?}",
+                    position
+                );
+                assert!(
+                    y >= 0,
+                    "Y coordinate should be non-negative for {:?}",
+                    position
+                );
+
                 // For right positions, x should account for HUD width
                 match position {
                     HudPosition::TopRight | HudPosition::BottomRight => {
@@ -729,7 +742,7 @@ mod tests {
                         assert_eq!(x, HUD_MARGIN);
                     }
                 }
-                
+
                 // For bottom positions, y should account for HUD height
                 match position {
                     HudPosition::BottomLeft | HudPosition::BottomRight => {
@@ -823,9 +836,9 @@ mod tests {
         // Test point inside inner barrier
         let mouse_x = 150;
         let mouse_y = 450;
-        let in_inner_barrier = mouse_x >= barrier_left 
-            && mouse_x <= barrier_right 
-            && mouse_y >= barrier_top 
+        let in_inner_barrier = mouse_x >= barrier_left
+            && mouse_x <= barrier_right
+            && mouse_y >= barrier_top
             && mouse_y <= barrier_bottom;
         assert!(in_inner_barrier);
 
@@ -836,11 +849,11 @@ mod tests {
             && mouse_x <= (barrier_right + buffer_zone)
             && mouse_y >= (barrier_top - buffer_zone)
             && mouse_y <= (barrier_bottom + buffer_zone);
-        let in_inner_barrier = mouse_x >= barrier_left 
-            && mouse_x <= barrier_right 
-            && mouse_y >= barrier_top 
+        let in_inner_barrier = mouse_x >= barrier_left
+            && mouse_x <= barrier_right
+            && mouse_y >= barrier_top
             && mouse_y <= barrier_bottom;
-        
+
         assert!(in_buffer_zone);
         assert!(!in_inner_barrier);
 
@@ -878,15 +891,19 @@ mod tests {
     #[test]
     fn test_refresh_interval_constant() {
         use std::time::Duration;
-        
+
         // Test that the refresh interval constant exists and is reasonable
         const REFRESH_INTERVAL: Duration = Duration::from_millis(33); // ~30 FPS
-        
+
         assert!(REFRESH_INTERVAL.as_millis() > 0);
         assert!(REFRESH_INTERVAL.as_millis() <= 100); // Should be faster than 10 FPS
-        
+
         // Verify it's approximately 30 FPS
         let fps = 1000.0 / REFRESH_INTERVAL.as_millis() as f64;
-        assert!(fps >= 25.0 && fps <= 35.0, "FPS should be around 30, got {}", fps);
+        assert!(
+            (25.0..=35.0).contains(&fps),
+            "FPS should be around 30, got {}",
+            fps
+        );
     }
 }

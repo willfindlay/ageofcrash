@@ -150,6 +150,25 @@ This ensures:
 
 **Note**: Never leave clippy warnings unaddressed. Fix all lints before proceeding to the next step.
 
+### Continuous Integration
+
+The project includes GitHub Actions workflows for automated quality assurance:
+
+**Unit Tests Workflow** (`.github/workflows/tests.yml`):
+- Runs on every push and pull request to main/develop branches
+- Executes all 79+ unit tests in both debug and release modes
+- Generates test coverage reports and uploads results as artifacts
+- Uses Windows runners to match the target platform
+
+**Code Quality Workflow** (`.github/workflows/code-quality.yml`):
+- Enforces code formatting with `cargo fmt --check`
+- Runs clippy lints with warnings treated as errors (`-D warnings`)
+- Verifies compilation in both debug and release modes
+- Validates project structure and required files
+- Caches dependencies for faster builds
+
+Both workflows must pass before merging changes to ensure consistent code quality and functionality.
+
 ### Clippy Lint Guidelines
 
 When fixing clippy lints, follow these patterns:

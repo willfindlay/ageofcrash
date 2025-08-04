@@ -174,7 +174,8 @@ mod tests {
         background_alpha: 200,
     ),
     debug: false,
-)"#.to_string()
+)"#
+        .to_string()
     }
 
     fn create_modified_config_content() -> String {
@@ -205,21 +206,23 @@ mod tests {
         background_alpha: 150,
     ),
     debug: true,
-)"#.to_string()
+)"#
+        .to_string()
     }
 
     fn create_invalid_config_content() -> String {
         r#"(
     this is not valid RON syntax
     missing parentheses and proper structure
-)"#.to_string()
+)"#
+        .to_string()
     }
 
     #[test]
     fn test_config_event_creation() {
         let config = Config::default();
         let event = ConfigEvent::Modified(config.clone());
-        
+
         match event {
             ConfigEvent::Modified(c) => {
                 assert_eq!(c.debug, config.debug);
@@ -247,10 +250,10 @@ mod tests {
     fn test_config_watcher_new_invalid_config() {
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("invalid_config.ron");
-        
+
         // Create invalid config file
         fs::write(&config_path, create_invalid_config_content()).unwrap();
-        
+
         let result = ConfigWatcher::new(&config_path);
         assert!(result.is_err());
     }
@@ -259,13 +262,13 @@ mod tests {
     fn test_config_watcher_new_valid_config() {
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("valid_config.ron");
-        
+
         // Create valid config file
         fs::write(&config_path, create_test_config_content()).unwrap();
-        
+
         let result = ConfigWatcher::new(&config_path);
         assert!(result.is_ok());
-        
+
         let (watcher, _rx) = result.unwrap();
         assert_eq!(watcher.path, config_path);
         assert!(!watcher.should_stop.load(Ordering::Relaxed));
@@ -276,18 +279,18 @@ mod tests {
     fn test_config_watcher_creation_and_cleanup() {
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("test_config.ron");
-        
+
         fs::write(&config_path, create_test_config_content()).unwrap();
-        
+
         let (mut watcher, _rx) = ConfigWatcher::new(&config_path).unwrap();
-        
+
         // Test that we can start and stop the watcher
         let start_result = watcher.start();
         assert!(start_result.is_ok());
-        
+
         // Stop the watcher
         watcher.stop();
-        
+
         // Should be safe to stop again
         watcher.stop();
     }
@@ -296,16 +299,16 @@ mod tests {
     fn test_config_watcher_drop_cleanup() {
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("test_config.ron");
-        
+
         fs::write(&config_path, create_test_config_content()).unwrap();
-        
+
         {
             let (mut watcher, _rx) = ConfigWatcher::new(&config_path).unwrap();
             let _result = watcher.start();
-            
+
             // Watcher should clean up when dropped
         } // Drop happens here
-        
+
         // If we get here without hanging, the drop cleanup worked
     }
 
@@ -313,11 +316,11 @@ mod tests {
     fn test_config_watcher_poll_interval() {
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("test_config.ron");
-        
+
         fs::write(&config_path, create_test_config_content()).unwrap();
-        
+
         let (watcher, _rx) = ConfigWatcher::new(&config_path).unwrap();
-        
+
         // Test default poll interval
         assert_eq!(watcher.poll_interval, Duration::from_millis(500));
     }
@@ -326,18 +329,18 @@ mod tests {
     fn test_config_watcher_path_handling() {
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("test_config.ron");
-        
+
         fs::write(&config_path, create_test_config_content()).unwrap();
-        
+
         let (watcher, _rx) = ConfigWatcher::new(&config_path).unwrap();
-        
+
         // Test that the path is stored correctly
         assert_eq!(watcher.path, config_path);
-        
+
         // Test with different path types
         let result = ConfigWatcher::new(config_path.as_path());
         assert!(result.is_ok());
-        
+
         let result = ConfigWatcher::new(config_path.to_str().unwrap());
         assert!(result.is_ok());
     }
@@ -346,11 +349,11 @@ mod tests {
     fn test_config_watcher_channel_creation() {
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("test_config.ron");
-        
+
         fs::write(&config_path, create_test_config_content()).unwrap();
-        
+
         let (_watcher, rx) = ConfigWatcher::new(&config_path).unwrap();
-        
+
         // Test that the receiver is created and can be used
         // We can't easily test message reception without starting the watcher
         // and modifying files, but we can test that the channel exists
@@ -372,18 +375,18 @@ mod tests {
     fn test_config_watcher_should_stop_flag() {
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("test_config.ron");
-        
+
         fs::write(&config_path, create_test_config_content()).unwrap();
-        
+
         let (mut watcher, _rx) = ConfigWatcher::new(&config_path).unwrap();
-        
+
         // Initially should not be stopped
         assert!(!watcher.should_stop.load(Ordering::Relaxed));
-        
+
         // After starting, should still not be stopped
         let _result = watcher.start();
         assert!(!watcher.should_stop.load(Ordering::Relaxed));
-        
+
         // After stopping, should be stopped
         watcher.stop();
         assert!(watcher.should_stop.load(Ordering::Relaxed));
@@ -393,18 +396,18 @@ mod tests {
     fn test_config_watcher_thread_management() {
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("test_config.ron");
-        
+
         fs::write(&config_path, create_test_config_content()).unwrap();
-        
+
         let (mut watcher, _rx) = ConfigWatcher::new(&config_path).unwrap();
-        
+
         // Initially no thread
         assert!(watcher.watcher_thread.is_none());
-        
+
         // After starting, should have thread
         let _result = watcher.start();
         assert!(watcher.watcher_thread.is_some());
-        
+
         // After stopping, thread should be cleaned up
         watcher.stop();
         assert!(watcher.watcher_thread.is_none());
@@ -416,30 +419,31 @@ mod tests {
     fn test_config_watcher_file_modification_detection() {
         use std::thread;
         use std::time::Duration;
-        
+
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("watch_test_config.ron");
-        
+
         // Create initial config
         fs::write(&config_path, create_test_config_content()).unwrap();
-        
+
         let (mut watcher, rx) = ConfigWatcher::new(&config_path).unwrap();
         let _result = watcher.start();
-        
+
         // Wait a moment for the watcher to initialize
         thread::sleep(Duration::from_millis(100));
-        
+
         // Modify the config file
         fs::write(&config_path, create_modified_config_content()).unwrap();
-        
+
         // Wait for the watcher to detect the change
         // Note: This timing is somewhat fragile in tests
         thread::sleep(Duration::from_millis(600)); // Slightly longer than poll interval
-        
+
         // Check if we received a modification event
         // Due to timing, we'll use a timeout-based approach
         let mut received_event = false;
-        for _ in 0..5 { // Try up to 5 times
+        for _ in 0..5 {
+            // Try up to 5 times
             match rx.try_recv() {
                 Ok(ConfigEvent::Modified(_)) => {
                     received_event = true;
@@ -457,9 +461,9 @@ mod tests {
                 }
             }
         }
-        
+
         watcher.stop();
-        
+
         // Note: Due to timing issues in tests, we'll make this assertion optional
         // In a real scenario, the event should be received
         if !received_event {
@@ -471,25 +475,25 @@ mod tests {
     fn test_config_watcher_error_handling_invalid_modification() {
         use std::thread;
         use std::time::Duration;
-        
+
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("error_test_config.ron");
-        
+
         // Create initial valid config
         fs::write(&config_path, create_test_config_content()).unwrap();
-        
+
         let (mut watcher, rx) = ConfigWatcher::new(&config_path).unwrap();
         let _result = watcher.start();
-        
+
         // Wait for watcher to initialize
         thread::sleep(Duration::from_millis(100));
-        
+
         // Write invalid config
         fs::write(&config_path, create_invalid_config_content()).unwrap();
-        
+
         // Wait for detection
         thread::sleep(Duration::from_millis(600));
-        
+
         // Check for error event
         let mut received_error = false;
         for _ in 0..5 {
@@ -510,9 +514,9 @@ mod tests {
                 }
             }
         }
-        
+
         watcher.stop();
-        
+
         if !received_error {
             println!("Warning: Error event not detected in test (timing-dependent)");
         }
