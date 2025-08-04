@@ -1,3 +1,4 @@
+use figment::{providers::Serialized, Figment, Profile};
 use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 use tracing::info;
@@ -86,26 +87,50 @@ impl Config {
     pub fn load_from_file<P: AsRef<std::path::Path>>(
         path: P,
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        // Use Figment to layer defaults with user config
+        let defaults = Config::default();
+        let config: Config = Figment::new()
+            .merge(Serialized::defaults(&defaults))
+            .merge(Serialized::from(
+                Self::load_ron_file(path)?,
+                Profile::Default,
+            ))
+            .extract()?;
+        Ok(config)
+    }
+
+    fn load_ron_file<P: AsRef<std::path::Path>>(
+        path: P,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let content = std::fs::read_to_string(path)?;
         let config: Config = ron::from_str(&content)?;
         Ok(config)
     }
 
     pub fn load_or_create(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        match std::fs::read_to_string(path) {
-            Ok(content) => {
-                // Parse the config file - must be complete and valid
-                let config: Config = ron::from_str(&content)?;
-                Ok(config)
-            }
-            Err(_) => {
-                // Create new default config if file doesn't exist
-                info!("Config file not found. Creating default config at {}", path);
-                let config = Config::default();
-                config.save(path)?;
-                Ok(config)
-            }
+        // Check if user config file exists
+        let user_config_exists = std::path::Path::new(path).exists();
+
+        // Build layered configuration using Figment
+        let defaults = Config::default();
+        let mut figment = Figment::new().merge(Serialized::defaults(&defaults));
+
+        // Layer user config file if it exists (overrides defaults)
+        if user_config_exists {
+            let user_config = Self::load_ron_file(path)?;
+            figment = figment.merge(Serialized::from(user_config, Profile::Default));
         }
+
+        // Extract the configuration
+        let config: Config = figment.extract()?;
+
+        // Create default config file if it doesn't exist
+        if !user_config_exists {
+            info!("Config file not found. Creating default config at {}", path);
+            config.save(path)?;
+        }
+
+        Ok(config)
     }
 
     pub fn save(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -209,6 +234,54 @@ mod tests {
         match restored.barrier.audio_feedback.on_barrier_entry {
             AudioOption::File(path) => assert_eq!(path, "test.wav"),
             _ => panic!("Expected File"),
+        }
+    }
+
+    #[test]
+    fn test_figment_preserves_file_syntax() {
+        let file_option = AudioOption::File("test.wav".to_string());
+        let none_option = AudioOption::None;
+
+        // Test that RON serialization preserves File("path") syntax
+        let file_ron = ron::to_string(&file_option).unwrap();
+        let none_ron = ron::to_string(&none_option).unwrap();
+
+        println!("AudioOption::File serialized: {}", file_ron);
+        println!("AudioOption::None serialized: {}", none_ron);
+
+        // Verify the File("path") syntax is preserved
+        assert_eq!(file_ron, "File(\"test.wav\")");
+        assert_eq!(none_ron, "None");
+
+        // Test that Figment layering works with these values
+        let test_config = Config {
+            barrier: BarrierConfig {
+                audio_feedback: AudioFeedbackConfig {
+                    on_barrier_hit: none_option.clone(),
+                    on_barrier_entry: file_option.clone(),
+                },
+                ..Config::default().barrier
+            },
+            ..Config::default()
+        };
+
+        // Use Figment to layer the config (simulating load_from_file logic)
+        let defaults = Config::default();
+        let layered_config: Config = Figment::new()
+            .merge(Serialized::defaults(&defaults))
+            .merge(Serialized::from(test_config, Profile::Default))
+            .extract()
+            .unwrap();
+
+        // Verify the layered config preserves the enum values correctly
+        match layered_config.barrier.audio_feedback.on_barrier_hit {
+            AudioOption::None => {}
+            _ => panic!("Expected None after Figment layering"),
+        }
+
+        match layered_config.barrier.audio_feedback.on_barrier_entry {
+            AudioOption::File(path) => assert_eq!(path, "test.wav"),
+            _ => panic!("Expected File after Figment layering"),
         }
     }
 
