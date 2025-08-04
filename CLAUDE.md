@@ -281,6 +281,23 @@ Common scopes for this project:
 - `tests` - Test suite modifications
 - `ci` - Continuous integration
 
+#### Security and Privacy (CRITICAL)
+
+**NEVER include in commit messages:**
+- API keys, tokens, or passwords
+- Private credentials of any kind
+- Personal information (addresses, phone numbers, etc.)
+- Internal URLs or system paths that could expose infrastructure
+- Database connection strings or configuration secrets
+
+**Exception**: The `Signed-off-by` line is the ONLY personal information
+that should appear in commit messages, and only the name/email from
+git config.
+
+**If examples are needed**: Use sanitized, fictional examples instead
+of real credentials. For instance, use `api_key: "example_key_123"` or
+`host: "example.com"` rather than actual values.
+
 #### Commit Sign-off (REQUIRED for Claude Code)
 
 **IMPORTANT**: All commits must be signed off with the human coder's 
