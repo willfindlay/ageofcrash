@@ -310,6 +310,7 @@ Common scopes for this project:
 - Personal information (addresses, phone numbers, etc.)
 - Internal URLs or system paths that could expose infrastructure
 - Database connection strings or configuration secrets
+- AI attribution lines such as "Generated with Claude" or "Co-Authored-By: Claude"
 
 **Exception**: The `Signed-off-by` line is the ONLY personal information
 that should appear in commit messages, and only the name/email from
