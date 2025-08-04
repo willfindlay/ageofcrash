@@ -3,7 +3,7 @@ mod config_watcher;
 mod hotkey;
 mod hud;
 
-use config::Config;
+use config::{AudioOption, Config};
 use config_watcher::{ConfigEvent, ConfigWatcher};
 use hotkey::HotkeyDetector;
 use hud::Hud;
@@ -54,6 +54,14 @@ impl AppState {
                 self.config.barrier.overlay_color.b,
             ),
             self.config.barrier.overlay_alpha,
+            match &self.config.barrier.audio_feedback.on_barrier_hit {
+                AudioOption::None => None,
+                AudioOption::File(path) => Some(path.clone()),
+            },
+            match &self.config.barrier.audio_feedback.on_barrier_entry {
+                AudioOption::None => None,
+                AudioOption::File(path) => Some(path.clone()),
+            },
         ));
 
         if self.barrier_enabled {
@@ -122,6 +130,14 @@ impl AppState {
                     new_config.barrier.overlay_color.b,
                 ),
                 new_config.barrier.overlay_alpha,
+                match &new_config.barrier.audio_feedback.on_barrier_hit {
+                    AudioOption::None => None,
+                    AudioOption::File(path) => Some(path.clone()),
+                },
+                match &new_config.barrier.audio_feedback.on_barrier_entry {
+                    AudioOption::None => None,
+                    AudioOption::File(path) => Some(path.clone()),
+                },
             );
 
             // If barrier was enabled, toggle it off and back on to refresh overlay windows

@@ -26,6 +26,19 @@ pub struct BarrierConfig {
     pub push_factor: i32,
     pub overlay_color: OverlayColor,
     pub overlay_alpha: u8, // 0-255, where 255 is opaque, 0 is transparent
+    pub audio_feedback: AudioFeedbackConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioFeedbackConfig {
+    pub on_barrier_hit: AudioOption,
+    pub on_barrier_entry: AudioOption,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AudioOption {
+    None,
+    File(String), // Path to audio file
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,6 +88,10 @@ impl Default for Config {
                     b: 0,   // Blue
                 },
                 overlay_alpha: 200, // Semi-transparent red
+                audio_feedback: AudioFeedbackConfig {
+                    on_barrier_hit: AudioOption::None,
+                    on_barrier_entry: AudioOption::None,
+                },
             },
             hud: HudConfig {
                 enabled: true,

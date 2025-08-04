@@ -23,6 +23,19 @@
             b: 0,         // Blue component (0-255, where 255 is full blue)
         ),
         overlay_alpha: 200,  // Transparency (0=invisible, 255=fully opaque)
+        
+        // Audio feedback settings
+        audio_feedback: (
+            // Sound to play when cursor hits the barrier buffer zone
+            // on_barrier_hit: File("C:\\Windows\\Media\\Windows Background.wav"),
+            // Or use None to disable sound:
+            on_barrier_hit: None,
+            
+            // Sound to play when cursor enters the actual barrier (rare event)
+            // on_barrier_entry: File("C:\\Windows\\Media\\Windows Critical Stop.wav"),
+            // Or use None to disable sound:
+            on_barrier_entry: None,
+        ),
     ),
     
     // HUD configuration - status display in corner of screen

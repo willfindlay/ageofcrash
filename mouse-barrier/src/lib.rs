@@ -5,10 +5,10 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 use tracing::{info, warn};
-use winapi::shared::minwindef::{LPARAM, LRESULT, TRUE, UINT, WPARAM};
+use winapi::shared::minwindef::{LPARAM, LRESULT, TRUE, UINT, WPARAM, HMODULE};
 use winapi::shared::windef::{HWND, POINT, RECT};
 use winapi::um::errhandlingapi::GetLastError;
-use winapi::um::libloaderapi::GetModuleHandleW;
+use winapi::um::libloaderapi::{GetModuleHandleW, LoadLibraryW, GetProcAddress};
 use winapi::um::wingdi::*;
 use winapi::um::winuser::*;
 
@@ -27,6 +27,7 @@ static MIDDLE_MOUSE_DOWN: AtomicBool = AtomicBool::new(false);
 static HOOK_INSTALL_REQUESTED: AtomicBool = AtomicBool::new(false);
 static HOOK_UNINSTALL_REQUESTED: AtomicBool = AtomicBool::new(false);
 static LAST_MOUSE_POS: Mutex<Option<POINT>> = Mutex::new(None);
+static HAS_ENTERED_BARRIER: AtomicBool = AtomicBool::new(false);
 static OVERLAY_WINDOWS: [AtomicPtr<winapi::shared::windef::HWND__>; 4] = [
     AtomicPtr::new(std::ptr::null_mut()),
     AtomicPtr::new(std::ptr::null_mut()),
@@ -50,6 +51,8 @@ struct MouseBarrierState {
     enabled: bool,
     overlay_color: u32, // RGB color as 0x00RRGGBB
     overlay_alpha: u8,  // Alpha transparency (0-255)
+    on_barrier_hit_sound: Option<String>,
+    on_barrier_entry_sound: Option<String>,
 }
 
 pub struct MouseBarrier;
@@ -66,6 +69,8 @@ impl MouseBarrier {
         push_factor: i32,
         overlay_color: (u8, u8, u8),
         overlay_alpha: u8,
+        on_barrier_hit_sound: Option<String>,
+        on_barrier_entry_sound: Option<String>,
     ) -> Self {
         // Convert from bottom-left origin to Windows top-left origin
         let barrier_rect = RECT {
@@ -84,6 +89,8 @@ impl MouseBarrier {
                 | ((overlay_color.1 as u32) << 8)
                 | (overlay_color.2 as u32),
             overlay_alpha,
+            on_barrier_hit_sound,
+            on_barrier_entry_sound,
         };
 
         let state_lock = MOUSE_BARRIER_STATE.get_or_init(|| Arc::new(Mutex::new(None)));
@@ -196,6 +203,8 @@ impl MouseBarrier {
         push_factor: i32,
         overlay_color: (u8, u8, u8),
         overlay_alpha: u8,
+        on_barrier_hit_sound: Option<String>,
+        on_barrier_entry_sound: Option<String>,
     ) {
         let state_lock = MOUSE_BARRIER_STATE.get().unwrap();
         if let Some(ref mut state) = *state_lock.lock().unwrap() {
@@ -212,6 +221,8 @@ impl MouseBarrier {
                 | ((overlay_color.1 as u32) << 8)
                 | (overlay_color.2 as u32);
             state.overlay_alpha = overlay_alpha;
+            state.on_barrier_hit_sound = on_barrier_hit_sound;
+            state.on_barrier_entry_sound = on_barrier_entry_sound;
 
             // Update the global overlay color
             CURRENT_OVERLAY_COLOR.store(state.overlay_color, Ordering::Relaxed);
@@ -365,7 +376,18 @@ unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) 
                         }
 
                         if point_in_rect(&current_pos, &state.barrier_rect) {
-                            warn!(x = current_pos.x, y = current_pos.y, "Cursor in barrier!")
+                            warn!(x = current_pos.x, y = current_pos.y, "Cursor in barrier!");
+                            
+                            // Play barrier entry sound if this is the first time
+                            if !HAS_ENTERED_BARRIER.load(Ordering::Acquire) {
+                                HAS_ENTERED_BARRIER.store(true, Ordering::Release);
+                                if let Some(ref sound_path) = state.on_barrier_entry_sound {
+                                    play_sound_async(sound_path);
+                                }
+                            }
+                        } else {
+                            // Reset the flag when cursor leaves barrier
+                            HAS_ENTERED_BARRIER.store(false, Ordering::Release);
                         }
 
                         let in_buffer = point_in_rect(&current_pos, &buffer_rect);
@@ -373,6 +395,13 @@ unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) 
 
                         if in_buffer != was_in_buffer {
                             LAST_IN_BARRIER.store(in_buffer, Ordering::Release);
+                            
+                            // Play barrier hit sound when entering buffer zone
+                            if in_buffer {
+                                if let Some(ref sound_path) = state.on_barrier_hit_sound {
+                                    play_sound_async(sound_path);
+                                }
+                            }
                         }
 
                         if in_buffer {
@@ -512,6 +541,41 @@ fn monitor_middle_button_and_control_hook() {
 
 fn point_in_rect(point: &POINT, rect: &RECT) -> bool {
     point.x >= rect.left && point.x < rect.right && point.y >= rect.top && point.y < rect.bottom
+}
+
+fn play_sound_async(sound_path: &str) {
+    let path = sound_path.to_string();
+    thread::spawn(move || {
+        unsafe {
+            // Load winmm.dll dynamically
+            let winmm_name: Vec<u16> = "winmm\0".encode_utf16().collect();
+            let winmm = LoadLibraryW(winmm_name.as_ptr());
+            if winmm.is_null() {
+                warn!("Failed to load winmm.dll for audio playback");
+                return;
+            }
+
+            // Get PlaySoundW function
+            let playsound_name = b"PlaySoundW\0";
+            let playsound_proc = GetProcAddress(winmm, playsound_name.as_ptr() as *const i8);
+            if playsound_proc.is_null() {
+                warn!("Failed to find PlaySoundW function");
+                return;
+            }
+
+            // Cast to function pointer and call
+            type PlaySoundWFn = unsafe extern "system" fn(*const u16, HMODULE, u32) -> i32;
+            let playsound_fn: PlaySoundWFn = std::mem::transmute(playsound_proc);
+            
+            let wide_path: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+            // SND_FILENAME = 0x00020000, SND_ASYNC = 0x0001, SND_NODEFAULT = 0x0002
+            playsound_fn(
+                wide_path.as_ptr(),
+                std::ptr::null_mut(),
+                0x00020000 | 0x0001 | 0x0002,
+            );
+        }
+    });
 }
 
 fn check_movement_path(start: &POINT, end: &POINT, barrier: &RECT, buffer: &RECT) -> Option<POINT> {
