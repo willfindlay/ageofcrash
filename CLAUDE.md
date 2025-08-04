@@ -146,7 +146,9 @@ The current test suite includes 79+ comprehensive unit tests covering:
 - File watching and configuration reloading
 - Error handling and edge cases
 
-**IMPORTANT**: After completing any requested code change, always run this full verification sequence:
+### CRITICAL: Code Quality Checks After EVERY Change
+
+**MANDATORY**: After making ANY code change, no matter how small, you MUST run:
 
 ```bash
 # 1. Run linter to catch code issues
@@ -157,11 +159,15 @@ cargo clippy
 
 # 3. Format code consistently
 cargo fmt
+```
 
+**BEFORE COMMITTING**: The above checks are ABSOLUTELY REQUIRED. Additionally run:
+
+```bash
 # 4. Run all tests to ensure functionality
 cargo test
 
-# 5. Deploy to verify the complete build process
+# 5. Deploy to verify the complete build process (optional but recommended)
 make deploy
 ```
 
@@ -171,7 +177,11 @@ This ensures:
 - All functionality works as expected (`test`)
 - The complete build and deployment pipeline works (`deploy`)
 
-**Note**: Never leave clippy warnings unaddressed. Fix all lints before proceeding to the next step.
+**CRITICAL REMINDERS**:
+- **NEVER commit without running `cargo clippy` and `cargo fmt`** - CI will fail if you do
+- **NEVER ignore clippy warnings** - fix ALL lints before proceeding
+- **Run these checks after EVERY change** - even small ones like removing a function or dependency
+- **The order matters**: Run clippy first to fix issues, then fmt to ensure consistent formatting
 
 ### Continuous Integration
 
