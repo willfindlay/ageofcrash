@@ -38,6 +38,9 @@ Keeping both documentation files current ensures future AI assistants and develo
    - Don't perform blocking operations in hook callbacks
    - Always use atomic operations for cross-thread communication
    - Consider hook interference with game input systems
+   - **CRITICAL**: Never use hardcoded screen dimensions, resolutions, or coordinate values in production code
+   - Always detect screen metrics dynamically using appropriate WinAPI calls (`GetSystemMetrics`, `EnumDisplaySettings`, etc.)
+   - **CRITICAL DPI SCALING**: Windows APIs mix coordinate systems - some use logical DPI-scaled coordinates while others use physical pixels. Must convert between them to avoid positioning bugs (see DPI Scaling section below)
 
 ## Project Overview
 
@@ -196,6 +199,169 @@ When fixing clippy lints, follow these patterns:
 - **Clone on copy**: Use dereference (`*`) instead of `.clone()` for Copy types
 - **Needless borrow**: Remove unnecessary `&` references
 
+### Commit Message Style Guide
+
+**CRITICAL**: This project follows [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) specification for all commit messages. This ensures consistent, parseable commit history and enables automated versioning.
+
+#### Commit Message Structure
+
+```
+<type>[optional scope]: <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+#### Commit Types (REQUIRED)
+
+**Primary Types:**
+- `feat:` - New feature (correlates with MINOR version bump)
+- `fix:` - Bug fix (correlates with PATCH version bump)
+
+**Additional Types:**
+- `docs:` - Documentation changes only
+- `style:` - Code style changes (formatting, missing semicolons, etc.)
+- `refactor:` - Code refactoring without changing functionality
+- `test:` - Adding or updating tests
+- `perf:` - Performance improvements
+- `build:` - Build system or dependency changes
+- `ci:` - CI/CD configuration changes
+- `chore:` - Maintenance tasks, dependency updates
+
+#### Breaking Changes
+
+Indicate breaking changes with either:
+1. `!` after the type/scope: `feat(api)!: remove deprecated endpoint`
+2. `BREAKING CHANGE:` footer in the commit body
+
+Breaking changes correlate with MAJOR version bumps.
+
+#### Formatting Rules
+
+**Title Line (REQUIRED):**
+- **Maximum 50 characters** - titles longer than 50 chars will be rejected
+- Use lowercase for type and description
+- No period at the end
+- Use imperative mood ("add feature" not "added feature")
+
+**Body (OPTIONAL):**
+- Separate from title with blank line
+- **Word wrap prose at 72 characters** for readability in terminals
+- Explain the "what" and "why", not the "how"
+- Use present tense, imperative mood
+- Long code examples should use indented code blocks:
+
+    ```rust
+    // Example code that exceeds line length
+    let very_long_variable_name = some_function_call()
+        .with_method_chaining()
+        .and_more_calls();
+    ```
+
+**Footer (OPTIONAL):**
+- Reference issues: `Closes #123` or `Fixes #456`
+- Breaking changes: `BREAKING CHANGE: description`
+- Co-authored commits (see below)
+
+#### Scopes (OPTIONAL)
+
+Use scopes to indicate which part of the codebase is affected:
+- `feat(config): add new barrier shape options`
+- `fix(hooks): resolve cursor positioning on high-DPI displays`
+- `docs(readme): update installation instructions`
+
+Common scopes for this project:
+- `config` - Configuration system changes
+- `hooks` - Windows hook implementation
+- `barrier` - Core barrier logic
+- `hotkey` - Hotkey detection system
+- `hud` - HUD display system
+- `overlay` - Visual overlay windows
+- `tests` - Test suite modifications
+- `ci` - Continuous integration
+
+#### Commit Sign-off (REQUIRED for Claude Code)
+
+**IMPORTANT**: All commits must be signed off with the human coder's 
+information from git config. Before making your first commit, run:
+
+```bash
+git config --get user.name
+git config --get user.email
+```
+
+Then include this footer in all commit messages:
+
+```
+Signed-off-by: [Name] <[email]>
+```
+
+This acknowledges that the human developer supervised and approved the
+AI-generated changes according to project contribution guidelines.
+
+#### Example Commit Messages
+
+**Simple feature:**
+```
+feat: add barrier color customization
+
+Allow users to configure barrier overlay color via config.ron.
+Supports RGB values and transparency settings.
+
+Closes #42
+Signed-off-by: [Name] <[email]>
+```
+
+**Bug fix with breaking change:**
+```
+fix(hooks)!: correct DPI scaling coordinate conversion
+
+Previously mixed physical and logical coordinates causing incorrect
+cursor positioning on high-DPI displays. This changes the internal
+coordinate system to consistently use physical coordinates.
+
+BREAKING CHANGE: MouseBarrierConfig now expects physical pixel
+coordinates instead of logical DPI-scaled coordinates.
+
+Fixes #89
+Signed-off-by: [Name] <[email]>
+```
+
+**Documentation update:**
+```
+docs: add DPI scaling troubleshooting guide
+
+Explain coordinate system differences and common positioning bugs
+to help future developers avoid DPI scaling issues.
+
+Signed-off-by: [Name] <[email]>
+```
+
+**Multi-line code example in body:**
+```
+refactor(barrier): simplify collision detection logic
+
+Extract complex geometry calculations into helper functions for
+better readability and testability:
+
+    fn point_in_rect(point: &POINT, rect: &RECT) -> bool {
+        point.x >= rect.left && point.x < rect.right && 
+        point.y >= rect.top && point.y < rect.bottom
+    }
+
+This change maintains identical behavior while improving code
+organization and making unit testing easier.
+
+Signed-off-by: [Name] <[email]>
+```
+
+#### Tools and Validation
+
+- Use `git log --oneline` to review commit title lengths
+- Configure git hook to validate commit message format if desired
+- Claude Code will automatically check title length and format
+
 ## Configuration System
 
 The app uses RON (Rusty Object Notation) for configuration:
@@ -242,6 +408,68 @@ The app uses RON (Rusty Object Notation) for configuration:
    - No data collection or network access
    - Requires admin privileges for system hooks
 
+## DPI Scaling and Coordinate Systems
+
+**CRITICAL**: Windows uses different coordinate systems that can cause subtle bugs if not handled correctly:
+
+### Coordinate System Types
+
+1. **Physical Coordinates** (used internally by mouse-barrier):
+   - Raw screen pixels from `EnumDisplaySettings`
+   - Examples: 3840x2160 on a 4K monitor
+   - Used for barrier collision detection and internal calculations
+
+2. **Logical Coordinates** (DPI-scaled):
+   - From `GetSystemMetrics(SM_CXSCREEN/SM_CYSCREEN)`
+   - Scaled by Windows DPI settings (e.g., 1920x1080 at 200% scaling)
+   - Used by `SetCursorPos` and some other Windows APIs
+
+### Implementation Details (`mouse-barrier/src/lib.rs`)
+
+The codebase caches both coordinate systems on initialization:
+
+```rust
+// Logical (DPI-scaled) coordinates
+let width = GetSystemMetrics(SM_CXSCREEN);
+let height = GetSystemMetrics(SM_CYSCREEN);
+
+// Physical coordinates
+let mut dev_mode: DEVMODEW = std::mem::zeroed();
+if EnumDisplaySettingsW(std::ptr::null(), ENUM_CURRENT_SETTINGS, &mut dev_mode) != 0 {
+    physical_width = dev_mode.dmPelsWidth as i32;
+    physical_height = dev_mode.dmPelsHeight as i32;
+}
+```
+
+### Conversion Functions
+
+**Physical → Logical** (for `SetCursorPos` and Windows API calls):
+```rust
+let scale_x = logical_width as f64 / physical_width as f64;
+let scale_y = logical_height as f64 / physical_height as f64;
+let logical_x = (physical_x as f64 * scale_x).round() as i32;
+let logical_y = (physical_y as f64 * scale_y).round() as i32;
+```
+
+**Critical Usage Locations**:
+- `push_point_out_of_rect()`: Converts barrier positions before calling `SetCursorPos`
+- `create_overlay_windows()`: Scales barrier dimensions for window positioning
+- Mouse hook receives physical coordinates, internal calculations use physical, then convert to logical for cursor movement
+
+### Common DPI Scaling Bugs to Avoid
+
+1. **Mixed coordinate systems**: Never mix physical coordinates from mouse hooks with logical coordinates from `GetSystemMetrics`
+2. **Assuming 1:1 scaling**: DPI scaling can be 125%, 150%, 200%, or custom values
+3. **Hardcoded positions**: Always calculate positions dynamically using proper scaling
+4. **API inconsistency**: Some Windows APIs expect logical coordinates, others expect physical
+
+### When DPI Scaling Matters
+
+- **High DPI displays**: 4K monitors with Windows scaling (common scenario)
+- **Multi-monitor setups**: Different monitors may have different DPI settings
+- **Remote desktop**: RDP sessions can have different scaling than local display
+- **Accessibility**: Users with vision impairments often use high DPI scaling
+
 ## Common Development Tasks
 
 ### Adding a new hotkey
@@ -266,6 +494,27 @@ The app uses RON (Rusty Object Notation) for configuration:
 - Enable trace logging: `RUST_LOG=trace cargo run`
 - Check Windows Event Viewer for hook issues
 - Use `cargo run -- --debug` flag if implemented
+
+## Logging Standards
+
+**IMPORTANT**: All logging in this project must use the `tracing` crate with appropriate log levels:
+
+- **`error!`**: Critical errors that prevent normal operation (hook failures, configuration errors)
+- **`warn!`**: Important warnings that don't stop execution but indicate potential issues
+- **`info!`**: General information about application state changes (barrier enabled/disabled, screen metrics)
+- **`debug!`**: Detailed debugging information useful during development
+- **`trace!`**: Very verbose logging for deep debugging (coordinate calculations, hook callbacks)
+
+**Never use**:
+- `println!` or `eprintln!` for logging in production code
+- `dbg!` macro (acceptable only for temporary debugging during development)
+- Any other logging mechanisms
+
+**Pattern**: Use structured logging with context when possible:
+```rust
+info!("Screen metrics initialized - Logical: {}x{}, Physical: {}x{}", 
+      width, height, physical_width, physical_height);
+```
 
 ## Testing Strategy
 
