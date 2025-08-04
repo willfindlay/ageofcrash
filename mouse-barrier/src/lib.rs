@@ -26,6 +26,7 @@ static MIDDLE_BUTTON_MONITORING: AtomicBool = AtomicBool::new(false);
 static MIDDLE_MOUSE_DOWN: AtomicBool = AtomicBool::new(false);
 static HOOK_INSTALL_REQUESTED: AtomicBool = AtomicBool::new(false);
 static HOOK_UNINSTALL_REQUESTED: AtomicBool = AtomicBool::new(false);
+static LAST_MOUSE_POS: Mutex<Option<POINT>> = Mutex::new(None);
 static OVERLAY_WINDOWS: [AtomicPtr<winapi::shared::windef::HWND__>; 4] = [
     AtomicPtr::new(std::ptr::null_mut()),
     AtomicPtr::new(std::ptr::null_mut()),
@@ -320,6 +321,15 @@ unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) 
             if let Ok(state_guard) = state_lock.lock() {
                 if let Some(ref state) = *state_guard {
                     if state.enabled {
+                        // Get last mouse position for trajectory checking
+                        let last_pos = if let Ok(mut last_pos_guard) = LAST_MOUSE_POS.lock() {
+                            let last = last_pos_guard.clone();
+                            *last_pos_guard = Some(current_pos);
+                            last
+                        } else {
+                            None
+                        };
+
                         // Create buffer zone rect
                         let buffer_rect = RECT {
                             left: state.barrier_rect.left - state.buffer_zone,
@@ -327,6 +337,32 @@ unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) 
                             right: state.barrier_rect.right + state.buffer_zone,
                             bottom: state.barrier_rect.bottom + state.buffer_zone,
                         };
+
+                        // First, check trajectory for fast movements
+                        if let Some(last) = last_pos {
+                            if let Some(safe_pos) = check_movement_path(&last, &current_pos, &state.barrier_rect, &buffer_rect) {
+                                // Movement would pass through barrier, stop at safe position
+                                SetCursorPos(safe_pos.x, safe_pos.y);
+                                return 1;
+                            }
+                            
+                            // Predictive positioning - check where cursor is heading
+                            let dx = current_pos.x - last.x;
+                            let dy = current_pos.y - last.y;
+                            let predicted_pos = POINT {
+                                x: current_pos.x + dx,
+                                y: current_pos.y + dy,
+                            };
+                            
+                            // If predicted position would be in barrier, stop now
+                            if point_in_rect(&predicted_pos, &state.barrier_rect) {
+                                // Find a safe position just outside the buffer
+                                let push_factor = calculate_dynamic_push_factor(state.push_factor, &last, &current_pos);
+                                let safe_pos = push_point_out_of_rect(&current_pos, &buffer_rect, push_factor);
+                                SetCursorPos(safe_pos.x, safe_pos.y);
+                                return 1;
+                            }
+                        }
 
                         if point_in_rect(&current_pos, &state.barrier_rect) {
                             warn!(x = current_pos.x, y = current_pos.y, "Cursor in barrier!")
@@ -340,10 +376,17 @@ unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) 
                         }
 
                         if in_buffer {
+                            // Calculate dynamic push factor based on movement speed
+                            let push_factor = if let Some(last) = last_pos {
+                                calculate_dynamic_push_factor(state.push_factor, &last, &current_pos)
+                            } else {
+                                state.push_factor
+                            };
+
                             let new_pos = push_point_out_of_rect(
                                 &current_pos,
                                 &buffer_rect,
-                                state.push_factor,
+                                push_factor,
                             );
 
                             SetCursorPos(new_pos.x, new_pos.y);
@@ -469,6 +512,55 @@ fn monitor_middle_button_and_control_hook() {
 
 fn point_in_rect(point: &POINT, rect: &RECT) -> bool {
     point.x >= rect.left && point.x < rect.right && point.y >= rect.top && point.y < rect.bottom
+}
+
+fn check_movement_path(start: &POINT, end: &POINT, barrier: &RECT, buffer: &RECT) -> Option<POINT> {
+    // Skip if movement is too small
+    let dx = end.x - start.x;
+    let dy = end.y - start.y;
+    if dx.abs() < 2 && dy.abs() < 2 {
+        return None;
+    }
+    
+    // Check multiple points along the movement path
+    let steps = 10; // More steps for better accuracy
+    for i in 1..=steps {
+        let t = i as f32 / steps as f32;
+        let check_point = POINT {
+            x: (start.x as f32 + dx as f32 * t) as i32,
+            y: (start.y as f32 + dy as f32 * t) as i32,
+        };
+        
+        // Check if this intermediate point hits the barrier
+        if point_in_rect(&check_point, barrier) {
+            // Find the last safe point outside the buffer zone
+            for j in (0..i).rev() {
+                let safe_t = j as f32 / steps as f32;
+                let safe_point = POINT {
+                    x: (start.x as f32 + dx as f32 * safe_t) as i32,
+                    y: (start.y as f32 + dy as f32 * safe_t) as i32,
+                };
+                
+                if !point_in_rect(&safe_point, buffer) {
+                    return Some(safe_point);
+                }
+            }
+            // If no safe point found, return start position
+            return Some(*start);
+        }
+    }
+    None
+}
+
+fn calculate_dynamic_push_factor(base_factor: i32, last_pos: &POINT, current_pos: &POINT) -> i32 {
+    let dx = (current_pos.x - last_pos.x) as f64;
+    let dy = (current_pos.y - last_pos.y) as f64;
+    let speed = (dx * dx + dy * dy).sqrt();
+    
+    // Scale push factor: faster movement = larger push
+    // Speed 10 = 1x, Speed 50 = 2x, Speed 100+ = 3x
+    let multiplier = (speed / 25.0).max(1.0).min(3.0);
+    (base_factor as f64 * multiplier) as i32
 }
 
 fn push_point_out_of_rect(point: &POINT, rect: &RECT, push_factor: i32) -> POINT {
