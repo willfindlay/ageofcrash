@@ -902,3 +902,263 @@ fn create_single_overlay_window(
         Ok(hwnd)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mouse_barrier_config_creation() {
+        let config = MouseBarrierConfig {
+            x: 100,
+            y: 200,
+            width: 300,
+            height: 150,
+            buffer_zone: 25,
+            push_factor: 50,
+            overlay_color: (255, 128, 64),
+            overlay_alpha: 200,
+            on_barrier_hit_sound: Some("hit.wav".to_string()),
+            on_barrier_entry_sound: None,
+        };
+
+        assert_eq!(config.x, 100);
+        assert_eq!(config.y, 200);
+        assert_eq!(config.width, 300);
+        assert_eq!(config.height, 150);
+        assert_eq!(config.buffer_zone, 25);
+        assert_eq!(config.push_factor, 50);
+        assert_eq!(config.overlay_color, (255, 128, 64));
+        assert_eq!(config.overlay_alpha, 200);
+        assert_eq!(config.on_barrier_hit_sound, Some("hit.wav".to_string()));
+        assert_eq!(config.on_barrier_entry_sound, None);
+    }
+
+    #[test]
+    fn test_point_in_rect() {
+        let rect = RECT {
+            left: 10,
+            top: 20,
+            right: 100,
+            bottom: 80,
+        };
+
+        // Point inside
+        let inside_point = POINT { x: 50, y: 40 };
+        assert!(point_in_rect(&inside_point, &rect));
+
+        // Point on boundary (excluded)
+        let boundary_point = POINT { x: 100, y: 40 };
+        assert!(!point_in_rect(&boundary_point, &rect));
+
+        // Point outside
+        let outside_point = POINT { x: 150, y: 40 };
+        assert!(!point_in_rect(&outside_point, &rect));
+
+        // Corner cases
+        let left_edge = POINT { x: 10, y: 40 };
+        assert!(point_in_rect(&left_edge, &rect));
+
+        let top_edge = POINT { x: 50, y: 20 };
+        assert!(point_in_rect(&top_edge, &rect));
+    }
+
+    #[test]
+    fn test_calculate_dynamic_push_factor() {
+        let last_pos = POINT { x: 0, y: 0 };
+        let base_factor = 50;
+
+        // No movement
+        let current_pos = POINT { x: 0, y: 0 };
+        let result = calculate_dynamic_push_factor(base_factor, &last_pos, &current_pos);
+        assert_eq!(result, base_factor); // Should be 1x multiplier
+
+        // Slow movement (speed < 25)
+        let current_pos = POINT { x: 10, y: 0 };
+        let result = calculate_dynamic_push_factor(base_factor, &last_pos, &current_pos);
+        assert_eq!(result, base_factor); // Should be 1x multiplier
+
+        // Medium movement (speed = 25)
+        let current_pos = POINT { x: 25, y: 0 };
+        let result = calculate_dynamic_push_factor(base_factor, &last_pos, &current_pos);
+        assert_eq!(result, base_factor); // Should be 1x multiplier
+
+        // Fast movement (speed = 50)
+        let current_pos = POINT { x: 50, y: 0 };
+        let result = calculate_dynamic_push_factor(base_factor, &last_pos, &current_pos);
+        assert_eq!(result, 100); // Should be 2x multiplier
+
+        // Very fast movement (speed = 75, should clamp to 3x)
+        let current_pos = POINT { x: 75, y: 0 };
+        let result = calculate_dynamic_push_factor(base_factor, &last_pos, &current_pos);
+        assert_eq!(result, 150); // Should be 3x multiplier
+
+        // Extremely fast movement (should clamp to 3x max)
+        let current_pos = POINT { x: 1000, y: 0 };
+        let result = calculate_dynamic_push_factor(base_factor, &last_pos, &current_pos);
+        assert_eq!(result, 150); // Should be clamped to 3x multiplier
+    }
+
+    #[test]
+    fn test_push_point_out_of_rect_basic() {
+        // Simple test case - mock screen size 
+        SCREEN_WIDTH.store(1920, Ordering::Relaxed);
+        SCREEN_HEIGHT.store(1080, Ordering::Relaxed);
+
+        let rect = RECT {
+            left: 100,
+            top: 100,
+            right: 200,
+            bottom: 200,
+        };
+        let push_factor = 20;
+
+        // Point inside rect - should be pushed out
+        let point = POINT { x: 150, y: 150 };
+        let pushed = push_point_out_of_rect(&point, &rect, push_factor);
+
+        // The point should be moved outside the rect
+        assert!(!point_in_rect(&pushed, &rect));
+    }
+
+    #[test]
+    fn test_check_movement_path_no_collision() {
+        let start = POINT { x: 50, y: 50 };
+        let end = POINT { x: 60, y: 50 };
+        let barrier = RECT {
+            left: 100,
+            top: 100,
+            right: 200,
+            bottom: 200,
+        };
+        let buffer = RECT {
+            left: 90,
+            top: 90,
+            right: 210,
+            bottom: 210,
+        };
+
+        let result = check_movement_path(&start, &end, &barrier, &buffer);
+        assert!(result.is_none()); // No collision, should return None
+    }
+
+    #[test]
+    fn test_check_movement_path_small_movement() {
+        let start = POINT { x: 50, y: 50 };
+        let end = POINT { x: 51, y: 50 }; // Very small movement
+        let barrier = RECT {
+            left: 100,
+            top: 100,
+            right: 200,
+            bottom: 200,
+        };
+        let buffer = RECT {
+            left: 90,
+            top: 90,
+            right: 210,
+            bottom: 210,
+        };
+
+        let result = check_movement_path(&start, &end, &barrier, &buffer);
+        assert!(result.is_none()); // Should skip small movements
+    }
+
+    #[test]
+    fn test_check_movement_path_collision() {
+        let start = POINT { x: 50, y: 150 };
+        let end = POINT { x: 250, y: 150 }; // Path goes through barrier
+        let barrier = RECT {
+            left: 100,
+            top: 100,
+            right: 200,
+            bottom: 200,
+        };
+        let buffer = RECT {
+            left: 90,
+            top: 90,
+            right: 210,
+            bottom: 210,
+        };
+
+        let result = check_movement_path(&start, &end, &barrier, &buffer);
+        assert!(result.is_some()); // Should detect collision and return safe point
+
+        let safe_point = result.unwrap();
+        assert!(!point_in_rect(&safe_point, &buffer)); // Safe point should be outside buffer
+    }
+
+    #[test]
+    fn test_mouse_barrier_state_creation() {
+        let state = MouseBarrierState {
+            barrier_rect: RECT {
+                left: 0,
+                top: 0,
+                right: 100,
+                bottom: 100,
+            },
+            buffer_zone: 10,
+            push_factor: 30,
+            enabled: false,
+            overlay_color: 0xFF0000,
+            overlay_alpha: 128,
+            on_barrier_hit_sound: Some("sound.wav".to_string()),
+            on_barrier_entry_sound: None,
+        };
+
+        assert_eq!(state.buffer_zone, 10);
+        assert_eq!(state.push_factor, 30);
+        assert!(!state.enabled);
+        assert_eq!(state.overlay_color, 0xFF0000);
+        assert_eq!(state.overlay_alpha, 128);
+        assert_eq!(state.on_barrier_hit_sound, Some("sound.wav".to_string()));
+        assert_eq!(state.on_barrier_entry_sound, None);
+    }
+
+    // Test helper functions
+    #[test]
+    fn test_coordinate_conversion_logic() {
+        // Test the coordinate conversion from bottom-left to top-left origin
+        let x = 100;
+        let y = 500; // This is bottom coordinate
+        let width = 200;
+        let height = 100;
+
+        let expected_rect = RECT {
+            left: x,
+            top: y - height, // top = 500 - 100 = 400
+            right: x + width, // right = 100 + 200 = 300
+            bottom: y, // bottom = 500
+        };
+
+        assert_eq!(expected_rect.left, 100);
+        assert_eq!(expected_rect.top, 400);
+        assert_eq!(expected_rect.right, 300);
+        assert_eq!(expected_rect.bottom, 500);
+    }
+
+    #[test]
+    fn test_overlay_color_conversion() {
+        let r = 255u8;
+        let g = 128u8;
+        let b = 64u8;
+
+        let expected_color = ((r as u32) << 16) | ((g as u32) << 8) | (b as u32);
+        assert_eq!(expected_color, 0xFF8040);
+
+        // Test different color combinations
+        let white = ((255u8 as u32) << 16) | ((255u8 as u32) << 8) | (255u8 as u32);
+        assert_eq!(white, 0xFFFFFF);
+
+        let black = ((0u8 as u32) << 16) | ((0u8 as u32) << 8) | (0u8 as u32);
+        assert_eq!(black, 0x000000);
+
+        let red = ((255u8 as u32) << 16) | ((0u8 as u32) << 8) | (0u8 as u32);
+        assert_eq!(red, 0xFF0000);
+
+        let green = ((0u8 as u32) << 16) | ((255u8 as u32) << 8) | (0u8 as u32);
+        assert_eq!(green, 0x00FF00);
+
+        let blue = ((0u8 as u32) << 16) | ((0u8 as u32) << 8) | (255u8 as u32);
+        assert_eq!(blue, 0x0000FF);
+    }
+}

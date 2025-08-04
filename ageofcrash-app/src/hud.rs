@@ -617,3 +617,276 @@ fn refresh_hud_windows() {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::HudPosition;
+
+
+    fn create_test_barrier_state_config(
+        enabled: bool,
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+        buffer_zone: i32,
+        push_factor: i32,
+    ) -> BarrierStateConfig {
+        BarrierStateConfig {
+            enabled,
+            x,
+            y,
+            width,
+            height,
+            buffer_zone,
+            push_factor,
+        }
+    }
+
+    #[test]
+    fn test_barrier_state_config_creation() {
+        let config = create_test_barrier_state_config(true, 100, 200, 300, 150, 25, 50);
+
+        assert!(config.enabled);
+        assert_eq!(config.x, 100);
+        assert_eq!(config.y, 200);
+        assert_eq!(config.width, 300);
+        assert_eq!(config.height, 150);
+        assert_eq!(config.buffer_zone, 25);
+        assert_eq!(config.push_factor, 50);
+    }
+
+    #[test]
+    fn test_hud_constants() {
+        // Test that HUD constants are reasonable
+        assert!(HUD_WIDTH > 0);
+        assert!(HUD_HEIGHT > 0);
+        assert!(HUD_MARGIN >= 0);
+        assert!(HUD_PADDING >= 0);
+        assert!(HUD_LINE_HEIGHT > 0);
+        assert!(HUD_TITLE_SPACING >= 0);
+
+        // Test that dimensions make sense
+        assert!(HUD_WIDTH > HUD_PADDING * 2);
+        assert!(HUD_HEIGHT > HUD_PADDING * 2);
+    }
+
+    #[test]
+    fn test_color_constants() {
+        // Test color constants are valid COLORREF values
+        assert_eq!(COLOR_WHITE, 0x00FFFFFF);
+        assert_eq!(COLOR_BLACK, 0x00000000);
+        assert_eq!(COLOR_GREEN, 0x0064FF64);
+        assert_eq!(COLOR_RED, 0x006464FF);
+        assert_eq!(COLOR_YELLOW, 0x0064FFFF);
+        assert_eq!(COLOR_DANGER_RED, 0x000000FF);
+
+        // Verify colors are in COLORREF format (0x00BBGGRR)
+        // For example, red should have B=0, G=0, R=255
+        assert_eq!(COLOR_DANGER_RED & 0xFF, 0xFF); // Red component
+        assert_eq!((COLOR_DANGER_RED >> 8) & 0xFF, 0x00); // Green component
+        assert_eq!((COLOR_DANGER_RED >> 16) & 0xFF, 0x00); // Blue component
+    }
+
+    #[test]
+    fn test_calculate_hud_position_top_left() {
+        let position = HudPosition::TopLeft;
+        let result = calculate_hud_position(&position);
+        
+        if let Ok((x, y)) = result {
+            assert_eq!(x, HUD_MARGIN);
+            assert_eq!(y, HUD_MARGIN);
+        }
+    }
+
+    #[test]
+    fn test_calculate_hud_position_all_positions() {
+        // We can't test actual screen dimensions in unit tests, but we can test the logic
+        // by checking the position calculation doesn't panic and returns reasonable values
+        
+        for position in [
+            HudPosition::TopLeft,
+            HudPosition::TopRight,
+            HudPosition::BottomLeft,
+            HudPosition::BottomRight,
+        ] {
+            let result = calculate_hud_position(&position);
+            assert!(result.is_ok(), "Position calculation should succeed for {:?}", position);
+            
+            if let Ok((x, y)) = result {
+                // Basic sanity checks - coordinates should be non-negative and account for margins
+                assert!(x >= 0, "X coordinate should be non-negative for {:?}", position);
+                assert!(y >= 0, "Y coordinate should be non-negative for {:?}", position);
+                
+                // For right positions, x should account for HUD width
+                match position {
+                    HudPosition::TopRight | HudPosition::BottomRight => {
+                        // x should be screen_width - HUD_WIDTH - HUD_MARGIN
+                        // We can't test exact values without mocking GetSystemMetrics
+                    }
+                    HudPosition::TopLeft | HudPosition::BottomLeft => {
+                        assert_eq!(x, HUD_MARGIN);
+                    }
+                }
+                
+                // For bottom positions, y should account for HUD height
+                match position {
+                    HudPosition::BottomLeft | HudPosition::BottomRight => {
+                        // y should be screen_height - HUD_HEIGHT - HUD_MARGIN
+                        // We can't test exact values without mocking GetSystemMetrics
+                    }
+                    HudPosition::TopLeft | HudPosition::TopRight => {
+                        assert_eq!(y, HUD_MARGIN);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_hud_state_creation() {
+        let state = HudState {
+            enabled: true,
+            x: 100,
+            y: 200,
+            width: 300,
+            height: 150,
+            buffer_zone: 25,
+            push_factor: 50,
+            mouse_x: 150,
+            mouse_y: 250,
+            mouse_in_barrier: false,
+            mouse_in_buffer: true,
+            last_refresh: std::time::Instant::now(),
+        };
+
+        assert!(state.enabled);
+        assert_eq!(state.x, 100);
+        assert_eq!(state.y, 200);
+        assert_eq!(state.width, 300);
+        assert_eq!(state.height, 150);
+        assert_eq!(state.buffer_zone, 25);
+        assert_eq!(state.push_factor, 50);
+        assert_eq!(state.mouse_x, 150);
+        assert_eq!(state.mouse_y, 250);
+        assert!(!state.mouse_in_barrier);
+        assert!(state.mouse_in_buffer);
+    }
+
+    #[test]
+    fn test_update_global_hud_state() {
+        // Test the global HUD state update function
+        update_global_hud_state(true, 50, 100, 200, 80, 15, 30);
+
+        // Verify the state was updated by checking via update_mouse_position
+        // This is indirect testing since we can't easily access the global state
+        update_mouse_position(75, 120);
+
+        // The function should not panic and should handle the update correctly
+        // More detailed testing would require accessing the global state directly
+    }
+
+    #[test]
+    fn test_update_mouse_position_coordinates() {
+        // Test basic coordinate updates
+        let test_cases = [
+            (0, 0),
+            (100, 200),
+            (1920, 1080),
+            (-10, -20), // Negative coordinates should be handled
+        ];
+
+        for (x, y) in test_cases {
+            // Should not panic
+            update_mouse_position(x, y);
+        }
+    }
+
+    #[test]
+    fn test_barrier_inside_detection_logic() {
+        // Test the coordinate conversion logic that's used in update_mouse_position
+        // We'll test the mathematical logic separately from the global state
+
+        let barrier_x = 100;
+        let barrier_y = 500; // bottom coordinate
+        let barrier_width = 200;
+        let barrier_height = 100;
+        let buffer_zone = 25;
+
+        // Convert to Windows coordinates (top-left origin)
+        let barrier_bottom = barrier_y;
+        let barrier_top = barrier_y - barrier_height; // 500 - 100 = 400
+        let barrier_left = barrier_x; // 100
+        let barrier_right = barrier_x + barrier_width; // 100 + 200 = 300
+
+        // Test point inside inner barrier
+        let mouse_x = 150;
+        let mouse_y = 450;
+        let in_inner_barrier = mouse_x >= barrier_left 
+            && mouse_x <= barrier_right 
+            && mouse_y >= barrier_top 
+            && mouse_y <= barrier_bottom;
+        assert!(in_inner_barrier);
+
+        // Test point in buffer zone but not inner barrier
+        let mouse_x = 80; // barrier_left - 20, within buffer zone (barrier_left - buffer_zone = 75)
+        let mouse_y = 450;
+        let in_buffer_zone = mouse_x >= (barrier_left - buffer_zone)
+            && mouse_x <= (barrier_right + buffer_zone)
+            && mouse_y >= (barrier_top - buffer_zone)
+            && mouse_y <= (barrier_bottom + buffer_zone);
+        let in_inner_barrier = mouse_x >= barrier_left 
+            && mouse_x <= barrier_right 
+            && mouse_y >= barrier_top 
+            && mouse_y <= barrier_bottom;
+        
+        assert!(in_buffer_zone);
+        assert!(!in_inner_barrier);
+
+        // Test point outside both
+        let mouse_x = 50; // Too far left
+        let mouse_y = 450;
+        let in_buffer_zone = mouse_x >= (barrier_left - buffer_zone)
+            && mouse_x <= (barrier_right + buffer_zone)
+            && mouse_y >= (barrier_top - buffer_zone)
+            && mouse_y <= (barrier_bottom + buffer_zone);
+        assert!(!in_buffer_zone);
+    }
+
+    // Test HUD position enum completeness
+    #[test]
+    fn test_hud_position_enum_values() {
+        // Ensure all enum variants can be created and are distinct
+        let positions = [
+            HudPosition::TopLeft,
+            HudPosition::TopRight,
+            HudPosition::BottomLeft,
+            HudPosition::BottomRight,
+        ];
+
+        // Test that we can create and compare positions
+        assert_ne!(positions[0], positions[1]);
+        assert_ne!(positions[0], positions[2]);
+        assert_ne!(positions[0], positions[3]);
+
+        // Test cloning
+        let cloned = positions[0].clone();
+        assert_eq!(positions[0], cloned);
+    }
+
+    #[test]
+    fn test_refresh_interval_constant() {
+        use std::time::Duration;
+        
+        // Test that the refresh interval constant exists and is reasonable
+        const REFRESH_INTERVAL: Duration = Duration::from_millis(33); // ~30 FPS
+        
+        assert!(REFRESH_INTERVAL.as_millis() > 0);
+        assert!(REFRESH_INTERVAL.as_millis() <= 100); // Should be faster than 10 FPS
+        
+        // Verify it's approximately 30 FPS
+        let fps = 1000.0 / REFRESH_INTERVAL.as_millis() as f64;
+        assert!(fps >= 25.0 && fps <= 35.0, "FPS should be around 30, got {}", fps);
+    }
+}

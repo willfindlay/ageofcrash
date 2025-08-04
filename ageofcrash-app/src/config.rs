@@ -57,7 +57,7 @@ pub struct HudConfig {
     pub background_alpha: u8,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum HudPosition {
     TopLeft,
     TopRight,
@@ -264,6 +264,7 @@ pub fn vk_code_from_string(key: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use winapi::um::winuser::*;
 
     #[test]
     fn test_default_config_can_be_created() {
@@ -465,10 +466,299 @@ mod tests {
             let json = serde_json::to_value(&config).unwrap();
             let restored: Config = serde_json::from_value(json).unwrap();
 
-            // Can't directly compare enums without PartialEq, so serialize both
-            let original_json = serde_json::to_value(&pos).unwrap();
-            let restored_json = serde_json::to_value(&restored.hud.position).unwrap();
-            assert_eq!(original_json, restored_json);
+            // Now we can directly compare since HudPosition has PartialEq
+            assert_eq!(restored.hud.position, pos);
         }
+    }
+
+    #[test]
+    fn test_hotkey_config_creation() {
+        let config = HotkeyConfig {
+            ctrl: true,
+            alt: false,
+            shift: true,
+            key: "F12".to_string(),
+        };
+
+        assert!(config.ctrl);
+        assert!(!config.alt);
+        assert!(config.shift);
+        assert_eq!(config.key, "F12");
+    }
+
+    #[test]
+    fn test_barrier_config_creation() {
+        let config = BarrierConfig {
+            x: 100,
+            y: 200,
+            width: 300,
+            height: 150,
+            buffer_zone: 25,
+            push_factor: 50,
+            overlay_color: OverlayColor { r: 255, g: 0, b: 0 },
+            overlay_alpha: 128,
+            audio_feedback: AudioFeedbackConfig {
+                on_barrier_hit: AudioOption::None,
+                on_barrier_entry: AudioOption::File("sound.wav".to_string()),
+            },
+        };
+
+        assert_eq!(config.x, 100);
+        assert_eq!(config.y, 200);
+        assert_eq!(config.width, 300);
+        assert_eq!(config.height, 150);
+        assert_eq!(config.buffer_zone, 25);
+        assert_eq!(config.push_factor, 50);
+        assert_eq!(config.overlay_color.r, 255);
+        assert_eq!(config.overlay_color.g, 0);
+        assert_eq!(config.overlay_color.b, 0);
+        assert_eq!(config.overlay_alpha, 128);
+        
+        match config.audio_feedback.on_barrier_hit {
+            AudioOption::None => {}
+            _ => panic!("Expected None"),
+        }
+        
+        match config.audio_feedback.on_barrier_entry {
+            AudioOption::File(path) => assert_eq!(path, "sound.wav"),
+            _ => panic!("Expected File"),
+        }
+    }
+
+    #[test]
+    fn test_hud_config_creation() {
+        let config = HudConfig {
+            enabled: true,
+            position: HudPosition::BottomRight,
+            background_alpha: 200,
+        };
+
+        assert!(config.enabled);
+        assert_eq!(config.position, HudPosition::BottomRight);
+        assert_eq!(config.background_alpha, 200);
+    }
+
+    #[test]
+    fn test_audio_feedback_config_creation() {
+        let config = AudioFeedbackConfig {
+            on_barrier_hit: AudioOption::File("hit.wav".to_string()),
+            on_barrier_entry: AudioOption::None,
+        };
+
+        match config.on_barrier_hit {
+            AudioOption::File(path) => assert_eq!(path, "hit.wav"),
+            _ => panic!("Expected File"),
+        }
+
+        match config.on_barrier_entry {
+            AudioOption::None => {}
+            _ => panic!("Expected None"),
+        }
+    }
+
+    #[test]
+    fn test_overlay_color_creation() {
+        let color = OverlayColor { r: 128, g: 64, b: 192 };
+        
+        assert_eq!(color.r, 128);
+        assert_eq!(color.g, 64);
+        assert_eq!(color.b, 192);
+    }
+
+    #[test]
+    fn test_config_struct_full_construction() {
+        let config = Config {
+            hotkey: HotkeyConfig {
+                ctrl: false,
+                alt: true,
+                shift: false,
+                key: "F1".to_string(),
+            },
+            barrier: BarrierConfig {
+                x: 50,
+                y: 1080,
+                width: 150,
+                height: 75,
+                buffer_zone: 20,
+                push_factor: 30,
+                overlay_color: OverlayColor { r: 0, g: 255, b: 0 },
+                overlay_alpha: 100,
+                audio_feedback: AudioFeedbackConfig {
+                    on_barrier_hit: AudioOption::File("beep.wav".to_string()),
+                    on_barrier_entry: AudioOption::File("enter.wav".to_string()),
+                },
+            },
+            hud: HudConfig {
+                enabled: false,
+                position: HudPosition::TopLeft,
+                background_alpha: 180,
+            },
+            debug: true,
+        };
+
+        // Verify hotkey config
+        assert!(!config.hotkey.ctrl);
+        assert!(config.hotkey.alt);
+        assert!(!config.hotkey.shift);
+        assert_eq!(config.hotkey.key, "F1");
+
+        // Verify barrier config
+        assert_eq!(config.barrier.x, 50);
+        assert_eq!(config.barrier.y, 1080);
+        assert_eq!(config.barrier.width, 150);
+        assert_eq!(config.barrier.height, 75);
+        assert_eq!(config.barrier.buffer_zone, 20);
+        assert_eq!(config.barrier.push_factor, 30);
+        assert_eq!(config.barrier.overlay_color.r, 0);
+        assert_eq!(config.barrier.overlay_color.g, 255);
+        assert_eq!(config.barrier.overlay_color.b, 0);
+        assert_eq!(config.barrier.overlay_alpha, 100);
+
+        // Verify HUD config
+        assert!(!config.hud.enabled);
+        assert_eq!(config.hud.position, HudPosition::TopLeft);
+        assert_eq!(config.hud.background_alpha, 180);
+
+        // Verify debug flag
+        assert!(config.debug);
+    }
+
+    #[test]
+    fn test_vk_code_from_string_function_keys() {
+        // Test various function keys (only F1-F12 are supported)
+        assert_eq!(vk_code_from_string("F1"), Some(VK_F1 as u32));
+        assert_eq!(vk_code_from_string("F5"), Some(VK_F5 as u32));
+        assert_eq!(vk_code_from_string("F12"), Some(VK_F12 as u32));
+        
+        // Test case sensitivity
+        assert_eq!(vk_code_from_string("f1"), Some(VK_F1 as u32));
+        assert_eq!(vk_code_from_string("f12"), Some(VK_F12 as u32));
+    }
+
+    #[test]
+    fn test_vk_code_from_string_alphabet() {
+        // Test alphabet keys
+        assert_eq!(vk_code_from_string("A"), Some(0x41));
+        assert_eq!(vk_code_from_string("M"), Some(0x4D));
+        assert_eq!(vk_code_from_string("Z"), Some(0x5A));
+        
+        // Test lowercase (should still work)
+        assert_eq!(vk_code_from_string("a"), Some(0x41));
+        assert_eq!(vk_code_from_string("z"), Some(0x5A));
+    }
+
+    #[test]
+    fn test_vk_code_from_string_numbers() {
+        // Test number keys
+        assert_eq!(vk_code_from_string("0"), Some(0x30));
+        assert_eq!(vk_code_from_string("5"), Some(0x35));
+        assert_eq!(vk_code_from_string("9"), Some(0x39));
+    }
+
+    #[test]
+    fn test_vk_code_from_string_unsupported_keys() {
+        // Test that unsupported special keys return None
+        assert_eq!(vk_code_from_string("SPACE"), None);
+        assert_eq!(vk_code_from_string("ENTER"), None);
+        assert_eq!(vk_code_from_string("ESC"), None);
+        assert_eq!(vk_code_from_string("TAB"), None);
+    }
+
+    #[test]
+    fn test_vk_code_from_string_invalid_keys() {
+        // Test invalid keys
+        assert_eq!(vk_code_from_string("INVALID"), None);
+        assert_eq!(vk_code_from_string("F24"), None); // Unsupported function key (only F1-F12)
+        assert_eq!(vk_code_from_string("F25"), None); // Unsupported function key
+        assert_eq!(vk_code_from_string(""), None); // Empty string
+        assert_eq!(vk_code_from_string("123"), None); // Invalid format
+    }
+
+    #[test]
+    fn test_config_serialization_roundtrip() {
+        let original = Config::default();
+        
+        // Serialize to RON
+        let ron_string = ron::to_string(&original).unwrap();
+        
+        // Deserialize back
+        let restored: Config = ron::from_str(&ron_string).unwrap();
+        
+        // Verify key fields are preserved
+        assert_eq!(restored.hotkey.ctrl, original.hotkey.ctrl);
+        assert_eq!(restored.hotkey.key, original.hotkey.key);
+        assert_eq!(restored.barrier.x, original.barrier.x);
+        assert_eq!(restored.barrier.width, original.barrier.width);
+        assert_eq!(restored.hud.enabled, original.hud.enabled);
+        assert_eq!(restored.debug, original.debug);
+    }
+
+    #[test]
+    fn test_config_clone() {
+        let original = Config::default();
+        let cloned = original.clone();
+        
+        // Verify they have the same values
+        assert_eq!(cloned.hotkey.ctrl, original.hotkey.ctrl);
+        assert_eq!(cloned.hotkey.key, original.hotkey.key);
+        assert_eq!(cloned.barrier.x, original.barrier.x);
+        assert_eq!(cloned.hud.enabled, original.hud.enabled);
+        assert_eq!(cloned.debug, original.debug);
+    }
+
+    #[test]
+    fn test_audio_option_variants() {
+        // Test None variant
+        let none_option = AudioOption::None;
+        match none_option {
+            AudioOption::None => {}
+            _ => panic!("Expected None variant"),
+        }
+        
+        // Test File variant
+        let file_option = AudioOption::File("test.wav".to_string());
+        match file_option {
+            AudioOption::File(path) => assert_eq!(path, "test.wav"),
+            _ => panic!("Expected File variant"),
+        }
+    }
+
+    #[test]
+    fn test_hud_position_all_variants() {
+        let positions = [
+            HudPosition::TopLeft,
+            HudPosition::TopRight,
+            HudPosition::BottomLeft,
+            HudPosition::BottomRight,
+        ];
+        
+        // Test that all variants can be created and are unique
+        for (i, pos1) in positions.iter().enumerate() {
+            for (j, pos2) in positions.iter().enumerate() {
+                if i == j {
+                    assert_eq!(pos1, pos2);
+                } else {
+                    assert_ne!(pos1, pos2);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_default_config_values() {
+        let config = Config::default();
+        
+        // Test that default values are reasonable
+        assert!(config.hotkey.ctrl); // Default should require Ctrl
+        assert_eq!(config.hotkey.key, "F12"); // Default key should be F12
+        assert_eq!(config.barrier.x, 0); // Default barrier at bottom-left corner
+        assert!(config.barrier.y > 0); // Should have a positive Y (screen height)
+        assert!(config.barrier.width > 0); // Should have positive width
+        assert!(config.barrier.height > 0); // Should have positive height
+        assert!(config.barrier.buffer_zone >= 0); // Buffer zone should be non-negative
+        assert!(config.barrier.push_factor > 0); // Push factor should be positive
+        assert_eq!(config.barrier.overlay_alpha, 200); // Default from config.ron
+        assert!(config.hud.enabled); // HUD enabled by default
+        assert!(!config.debug); // Debug disabled by default
     }
 }
