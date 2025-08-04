@@ -777,54 +777,108 @@ mod tests {
         }
 
         #[test]
-        fn prop_config_fallback_to_defaults(user_config in arb_config()) {
-            // Test Figment layering directly without file I/O to avoid RON parsing issues
-            // This tests that when we layer a user config over defaults, we get the expected result
+        fn prop_config_fallback_to_defaults(
+            (complete_config, subset_fields) in (arb_config(), any::<u8>())
+        ) {
+            // Use a bitmask to determine which fields to include in the "user" config
+            // This simulates a partial user config file by creating a partial config that
+            // only includes selected fields
+            let include_hotkey_ctrl = (subset_fields & 0x01) != 0;
+            let include_barrier_x = (subset_fields & 0x10) != 0;
+            let include_hud_enabled = (subset_fields & 0x40) != 0;
+            let include_debug = (subset_fields & 0x80) != 0;
 
             let default_config = Config::default();
 
-            // Use Figment to layer user config over defaults (same as load_from_file)
-            let layered_config: Config = Figment::new()
-                .merge(Serialized::defaults(&default_config))
-                .merge(Serialized::from(user_config.clone(), Profile::Default))
-                .extract()
-                .unwrap();
+            // Create a serde_json::Value that represents a partial config file
+            let mut user_config_value = serde_json::json!({});
 
-            // All user-specified fields should be preserved
-            prop_assert_eq!(layered_config.hotkey.ctrl, user_config.hotkey.ctrl);
-            prop_assert_eq!(layered_config.hotkey.alt, user_config.hotkey.alt);
-            prop_assert_eq!(layered_config.hotkey.shift, user_config.hotkey.shift);
-            prop_assert_eq!(layered_config.hotkey.key, user_config.hotkey.key);
-
-            prop_assert_eq!(layered_config.barrier.x, user_config.barrier.x);
-            prop_assert_eq!(layered_config.barrier.y, user_config.barrier.y);
-            prop_assert_eq!(layered_config.barrier.width, user_config.barrier.width);
-            prop_assert_eq!(layered_config.barrier.height, user_config.barrier.height);
-            prop_assert_eq!(layered_config.barrier.buffer_zone, user_config.barrier.buffer_zone);
-            prop_assert_eq!(layered_config.barrier.push_factor, user_config.barrier.push_factor);
-            prop_assert_eq!(layered_config.barrier.overlay_color.r, user_config.barrier.overlay_color.r);
-            prop_assert_eq!(layered_config.barrier.overlay_color.g, user_config.barrier.overlay_color.g);
-            prop_assert_eq!(layered_config.barrier.overlay_color.b, user_config.barrier.overlay_color.b);
-            prop_assert_eq!(layered_config.barrier.overlay_alpha, user_config.barrier.overlay_alpha);
-
-            prop_assert_eq!(layered_config.hud.enabled, user_config.hud.enabled);
-            prop_assert_eq!(layered_config.hud.position, user_config.hud.position);
-            prop_assert_eq!(layered_config.hud.background_alpha, user_config.hud.background_alpha);
-
-            prop_assert_eq!(layered_config.debug, user_config.debug);
-
-            // Verify audio feedback options are preserved
-            match (&user_config.barrier.audio_feedback.on_barrier_hit, &layered_config.barrier.audio_feedback.on_barrier_hit) {
-                (AudioOption::None, AudioOption::None) => {},
-                (AudioOption::File(orig), AudioOption::File(layered)) => prop_assert_eq!(orig, layered),
-                _ => prop_assert!(false, "Audio option mismatch for on_barrier_hit"),
+            if include_hotkey_ctrl {
+                user_config_value["hotkey"] = serde_json::json!({
+                    "ctrl": complete_config.hotkey.ctrl
+                });
             }
 
-            match (&user_config.barrier.audio_feedback.on_barrier_entry, &layered_config.barrier.audio_feedback.on_barrier_entry) {
-                (AudioOption::None, AudioOption::None) => {},
-                (AudioOption::File(orig), AudioOption::File(layered)) => prop_assert_eq!(orig, layered),
-                _ => prop_assert!(false, "Audio option mismatch for on_barrier_entry"),
+            if include_barrier_x {
+                user_config_value["barrier"] = serde_json::json!({
+                    "x": complete_config.barrier.x
+                });
             }
+
+            if include_hud_enabled {
+                user_config_value["hud"] = serde_json::json!({
+                    "enabled": complete_config.hud.enabled
+                });
+            }
+
+            if include_debug {
+                user_config_value["debug"] = serde_json::Value::Bool(complete_config.debug);
+            }
+
+            // Create Figment with defaults, then layer the partial user config
+            let mut figment = Figment::new().merge(Serialized::defaults(&default_config));
+
+            // Only merge if we have any user overrides
+            if user_config_value.as_object().unwrap().len() > 0 {
+                figment = figment.merge(Serialized::from(user_config_value, Profile::Default));
+            }
+
+            let layered_config: Config = figment.extract().unwrap();
+
+            // Verify that included fields match the user values, missing fields use defaults
+            if include_hotkey_ctrl {
+                prop_assert_eq!(layered_config.hotkey.ctrl, complete_config.hotkey.ctrl);
+                // Other hotkey fields should be defaults since we only set ctrl
+                prop_assert_eq!(layered_config.hotkey.alt, default_config.hotkey.alt);
+                prop_assert_eq!(layered_config.hotkey.shift, default_config.hotkey.shift);
+                prop_assert_eq!(layered_config.hotkey.key, default_config.hotkey.key);
+            } else {
+                // All hotkey fields should be defaults
+                prop_assert_eq!(layered_config.hotkey.ctrl, default_config.hotkey.ctrl);
+                prop_assert_eq!(layered_config.hotkey.alt, default_config.hotkey.alt);
+                prop_assert_eq!(layered_config.hotkey.shift, default_config.hotkey.shift);
+                prop_assert_eq!(layered_config.hotkey.key, default_config.hotkey.key);
+            }
+
+            if include_barrier_x {
+                prop_assert_eq!(layered_config.barrier.x, complete_config.barrier.x);
+                // Other barrier fields should be defaults since we only set x
+                prop_assert_eq!(layered_config.barrier.y, default_config.barrier.y);
+                prop_assert_eq!(layered_config.barrier.width, default_config.barrier.width);
+                prop_assert_eq!(layered_config.barrier.height, default_config.barrier.height);
+            } else {
+                // All barrier fields should be defaults
+                prop_assert_eq!(layered_config.barrier.x, default_config.barrier.x);
+                prop_assert_eq!(layered_config.barrier.y, default_config.barrier.y);
+                prop_assert_eq!(layered_config.barrier.width, default_config.barrier.width);
+                prop_assert_eq!(layered_config.barrier.height, default_config.barrier.height);
+            }
+
+            if include_hud_enabled {
+                prop_assert_eq!(layered_config.hud.enabled, complete_config.hud.enabled);
+                // Other hud fields should be defaults since we only set enabled
+                prop_assert_eq!(layered_config.hud.position, default_config.hud.position);
+                prop_assert_eq!(layered_config.hud.background_alpha, default_config.hud.background_alpha);
+            } else {
+                // All hud fields should be defaults
+                prop_assert_eq!(layered_config.hud.enabled, default_config.hud.enabled);
+                prop_assert_eq!(layered_config.hud.position, default_config.hud.position);
+                prop_assert_eq!(layered_config.hud.background_alpha, default_config.hud.background_alpha);
+            }
+
+            if include_debug {
+                prop_assert_eq!(layered_config.debug, complete_config.debug);
+            } else {
+                prop_assert_eq!(layered_config.debug, default_config.debug);
+            }
+
+            // All other fields should always be defaults since we never override them
+            prop_assert_eq!(layered_config.barrier.buffer_zone, default_config.barrier.buffer_zone);
+            prop_assert_eq!(layered_config.barrier.push_factor, default_config.barrier.push_factor);
+            prop_assert_eq!(layered_config.barrier.overlay_alpha, default_config.barrier.overlay_alpha);
+            prop_assert_eq!(layered_config.barrier.overlay_color.r, default_config.barrier.overlay_color.r);
+            prop_assert_eq!(layered_config.barrier.overlay_color.g, default_config.barrier.overlay_color.g);
+            prop_assert_eq!(layered_config.barrier.overlay_color.b, default_config.barrier.overlay_color.b);
         }
     }
 }
