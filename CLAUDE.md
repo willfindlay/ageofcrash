@@ -7,7 +7,9 @@
 - Adding new dependencies, tools, or development practices
 - Discovering important patterns, gotchas, or best practices
 
-Keeping this documentation current ensures future AI assistants and developers have accurate, up-to-date guidance for working with this codebase effectively.
+**IMPORTANT**: Also **keep README.md updated** with user-facing changes and critical information that new developers need to contribute to the project. The README serves as the public face of the project while CLAUDE.md contains detailed development guidance.
+
+Keeping both documentation files current ensures future AI assistants and developers have accurate, up-to-date guidance for working with this codebase effectively.
 
 ## Getting Started - READ FIRST
 

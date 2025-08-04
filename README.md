@@ -2,16 +2,30 @@
 
 A Windows application that prevents your mouse cursor from entering a specific rectangular area on the screen, designed to work around the crash bug in Age of Empires IV when the mouse enters the bottom-left corner.
 
+## Project Origin
+
+This project started as a **vibe coding experiment** - coding with an AI assistant and just going with the vibe of whatever seemed interesting or fun to implement. No grand plan, no formal requirements, just "hey this gaming bug is annoying, let's see what happens if we try to fix it" and then following whatever direction felt right in the moment.
+
+What began as casual experimentation somehow turned into a reasonably solid piece of software. Sometimes that's just how it goes.
+
 ## Features
 
 - **Mouse Barrier**: Prevents the mouse from entering a configurable rectangular area
 - **Push Factor**: When the mouse enters the restricted area, it gets pushed away by a configurable distance
-- **Hotkey Toggle**: Toggle the barrier on/off using a configurable hotkey combination
-- **RON Configuration**: Easy-to-edit configuration file format
+- **Hotkey Toggle**: Toggle the barrier on/off using a configurable hotkey combination (F1-F12, A-Z, 0-9 with modifiers)
+- **Real-time HUD**: Optional overlay showing barrier status, position, and mouse coordinates
+- **Audio Feedback**: Configurable sound effects for barrier interactions
+- **Hot Configuration Reload**: Automatically reloads settings when config file changes
+- **RON Configuration**: Easy-to-edit configuration file format with smart defaults
+- **Overlay Visualization**: Optional colored overlay showing the barrier area
 
 ## Building
 
 This project requires Rust and is Windows-specific due to its use of Windows API hooks.
+
+### Prerequisites
+- Rust toolchain (latest stable)
+- Windows 10 or later
 
 ### Native Windows Build
 ```bash
@@ -20,6 +34,13 @@ cargo build --release
 
 # Run the application
 cargo run --bin ageofcrash
+
+# Run tests (79+ comprehensive unit tests)
+cargo test
+
+# Check code quality
+cargo clippy
+cargo fmt --check
 ```
 
 ### Cross-compilation from WSL
@@ -69,25 +90,7 @@ The `make deploy` target will create a folder on your Windows desktop with:
 
 The application reads its configuration from `config.ron` in the current directory. If the file doesn't exist, it will be created with default values.
 
-### Default Configuration
-
-```ron
-(
-    hotkey: (
-        ctrl: true,
-        alt: false,
-        shift: false,
-        key: "F12",
-    ),
-    barrier: (
-        x: 0,          // Left edge (x grows right)
-        y: 1080,       // Bottom edge (y is bottom of barrier)
-        width: 200,    // Width grows right from x
-        height: 40,    // Height grows up from y
-        push_factor: 50,
-    ),
-)
-```
+**See `config.ron` for the complete configuration structure with detailed comments.**
 
 ### Configuration Options
 
@@ -100,7 +103,18 @@ The application reads its configuration from `config.ron` in the current directo
   - `y`: Bottom edge coordinate (this is the bottom of the barrier)
   - `width`: Width of barrier (extends right from x)
   - `height`: Height of barrier (extends upward from y)
+  - `buffer_zone`: Additional detection area around the barrier (pixels)
   - `push_factor`: How far to push the cursor away when it enters the area
+  - `overlay_color`: RGB color values (0-255) for barrier visualization
+  - `overlay_alpha`: Transparency of overlay (0=invisible, 255=opaque)
+  - `audio_feedback`: Optional sound file paths for barrier events
+
+- **hud**: Real-time information overlay
+  - `enabled`: Show/hide the HUD overlay
+  - `position`: Screen corner placement (TopLeft, TopRight, BottomLeft, BottomRight)
+  - `background_alpha`: HUD background transparency (0-255)
+
+- **debug**: Enable detailed logging for troubleshooting
 
 ### Coordinate System
 
@@ -121,17 +135,88 @@ This makes it intuitive to define UI panels that sit at the bottom of the screen
 
 ## Architecture
 
-The project consists of two crates:
+The project follows a clean two-crate workspace design:
 
-- **mouse-barrier**: Library crate providing Windows API hooks for mouse and keyboard
-- **ageofcrash-app**: Main application with configuration and user interface
+- **mouse-barrier**: Reusable library crate providing Windows API hooks for mouse and keyboard interaction
+- **ageofcrash-app**: Main application with configuration management, HUD, audio feedback, and user interface
+
+### Key Components
+- **Configuration System**: RON-based config with hot-reload and smart defaults
+- **Windows Hooks**: Low-level mouse and keyboard event interception
+- **HUD System**: Real-time overlay with position tracking and status display
+- **Audio Feedback**: Optional sound effects for barrier interactions
+- **Test Suite**: 79+ comprehensive unit tests covering all major functionality
+
+## Testing & Quality Assurance
+
+This project follows **Test-Driven Development (TDD)** principles with comprehensive test coverage:
+
+### Test Coverage
+- **79+ Unit Tests** across all components
+- **Configuration Testing**: Serialization, validation, and merging
+- **Core Logic Testing**: Geometry calculations, collision detection, state management
+- **Integration Testing**: File watching, configuration reloading
+- **Edge Case Testing**: Invalid inputs, error conditions, boundary values
+
+### Continuous Integration
+- **GitHub Actions** for automated testing and quality checks
+- **Code Formatting**: Enforced via `cargo fmt`
+- **Linting**: Zero-warning policy with `cargo clippy`
+- **Multi-target Testing**: Debug and release builds on Windows runners
+
+### Quality Commands
+```bash
+# Run all tests
+cargo test
+
+# Check code formatting
+cargo fmt --check
+
+# Run linter (zero warnings required)
+cargo clippy -- -D warnings
+
+# Check compilation
+cargo check --all-targets --all-features
+```
+
+## Contributing
+
+This project welcomes contributions! Before contributing:
+
+1. **Read the Development Guide**: See `CLAUDE.md` for detailed development workflows, architecture notes, and best practices
+2. **Follow TDD**: Write tests first when adding new functionality
+3. **Maintain Quality**: All code must pass `cargo clippy`, `cargo fmt --check`, and `cargo test`
+4. **Update Documentation**: Keep both `README.md` and `CLAUDE.md` current with your changes
+
+### Development Workflow
+```bash
+# 1. Install dependencies and setup
+rustup target add x86_64-pc-windows-gnu  # If cross-compiling
+
+# 2. Make changes following TDD principles
+cargo test  # Run tests frequently
+
+# 3. Quality checks before committing
+cargo clippy -- -D warnings  # Zero warnings required
+cargo fmt                    # Format code
+cargo test                   # All tests must pass
+
+# 4. Update documentation as needed
+```
 
 ## Requirements
 
-- Windows (uses Windows API)
-- Rust toolchain
-- Administrator privileges may be required for low-level hooks
+- **Windows 10 or later** (uses Windows API)
+- **Rust toolchain** (latest stable)
 
 ## Safety and Security
 
-This application uses low-level Windows hooks that can potentially interfere with system operation. Use responsibly and only run from trusted sources.
+This application uses low-level Windows hooks that can potentially interfere with system operation. The software is designed as a **defensive tool** to prevent application crashes and does not collect data or access the network.
+
+**Security Features:**
+- No network connectivity
+- Local configuration storage only
+- Comprehensive test coverage for reliability
+- Open source for transparency and security auditing
+
+Use responsibly and only run from trusted sources.
