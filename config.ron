@@ -41,7 +41,7 @@
     // HUD configuration - status display in corner of screen
     hud: (
         enabled: true,        // Show/hide the HUD display
-        position: TopLeft,    // Position: TopLeft, TopRight, BottomLeft, BottomRight
+        position: "TopLeft",  // Position: "TopLeft", "TopRight", "BottomLeft", "BottomRight"
         background_alpha: 180, // Background transparency (0=invisible, 255=opaque)
     ),
     
