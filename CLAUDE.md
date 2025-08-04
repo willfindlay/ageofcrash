@@ -250,6 +250,9 @@ Breaking changes correlate with MAJOR version bumps.
 - **Word wrap prose at 72 characters** for readability in terminals
 - Explain the "what" and "why", not the "how"
 - Use present tense, imperative mood
+- **For major features or bug fixes**: Include technical details about
+  how the implementation works, any limitations or pitfalls, and
+  potential future improvements or considerations
 - Long code examples should use indented code blocks:
 
     ```rust
@@ -369,6 +372,31 @@ better readability and testability:
 
 This change maintains identical behavior while improving code
 organization and making unit testing easier.
+
+Signed-off-by: [Name] <[email]>
+```
+
+**Major feature with technical details:**
+```
+feat(hooks): implement predictive cursor blocking
+
+Add algorithm to detect fast mouse movements that might skip
+over traditional collision detection by sampling intermediate
+points along the movement path.
+
+Implementation uses linear interpolation to check 10 sample
+points between previous and current cursor positions. When
+any sample point intersects the barrier, cursor is redirected
+to the last safe position outside the buffer zone.
+
+Limitations: Very high DPI mice (>12000 DPI) at maximum
+sensitivity may still occasionally skip detection with
+extremely fast movements. Algorithm adds ~0.1ms latency
+to mouse processing in barrier-enabled areas.
+
+Future work: Consider using Bresenham's line algorithm for
+more efficient path sampling or implementing hardware-level
+cursor interception.
 
 Signed-off-by: [Name] <[email]>
 ```
