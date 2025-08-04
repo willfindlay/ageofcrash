@@ -108,6 +108,21 @@ cargo test
 
 ## Development Workflow
 
+**IMPORTANT**: This project follows **Test-Driven Development (TDD)** principles wherever possible and feasible. When implementing new features or making changes:
+
+1. **Write tests first** when adding new functionality
+2. **Run tests frequently** during development to catch regressions early
+3. **Maintain comprehensive test coverage** for all critical components
+4. **Use tests to guide implementation** and ensure code meets requirements
+
+The current test suite includes 79+ comprehensive unit tests covering:
+- Configuration structs and serialization
+- Mouse barrier core functionality and geometry calculations  
+- Hotkey detection and state management
+- HUD positioning and rendering logic
+- File watching and configuration reloading
+- Error handling and edge cases
+
 **IMPORTANT**: After completing any requested code change, always run this full verification sequence:
 
 ```bash
@@ -216,9 +231,55 @@ The app uses RON (Rusty Object Notation) for configuration:
 - Check Windows Event Viewer for hook issues
 - Use `cargo run -- --debug` flag if implemented
 
-## Testing Notes
+## Testing Strategy
 
-No automated tests currently exist. Manual testing procedure:
+**Test-Driven Development**: This project follows TDD principles with comprehensive unit test coverage.
+
+### Automated Testing
+
+The project includes **79+ unit tests** covering all major components:
+
+**Configuration Testing** (25 tests):
+- Config struct creation and validation
+- Serialization/deserialization (RON and JSON)
+- Configuration merging with defaults
+- Virtual key code parsing and validation
+- Error handling for invalid configurations
+
+**Mouse Barrier Core** (10 tests):
+- Geometric calculations and collision detection
+- Coordinate system conversion (Windows ↔ mathematical)
+- Push factor calculations and boundary handling
+- Color conversion and state management
+
+**Hotkey Detection** (19 tests):
+- Key combination detection and modifier handling
+- State management and configuration updates
+- Edge cases for invalid keys and combinations
+
+**HUD System** (10 tests):
+- Position calculations for all screen corners
+- Color constants and rendering logic
+- Mouse position tracking and barrier detection
+
+**File Watching** (13 tests):
+- Configuration file monitoring and hot-reload
+- Error handling for invalid file modifications
+- Thread management and cleanup
+
+**Testing Commands**:
+```bash
+# Run all tests
+cargo test
+
+# Run tests with output
+cargo test -- --nocapture
+
+# Run specific test module
+cargo test config::tests
+```
+
+### Manual Testing Procedure
 1. Build and run the application
 2. Toggle barrier with configured hotkey
 3. Test mouse movement near restricted area
