@@ -5,10 +5,10 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 use tracing::{info, warn};
-use winapi::shared::minwindef::{LPARAM, LRESULT, TRUE, UINT, WPARAM, HMODULE};
+use winapi::shared::minwindef::{HMODULE, LPARAM, LRESULT, TRUE, UINT, WPARAM};
 use winapi::shared::windef::{HWND, POINT, RECT};
 use winapi::um::errhandlingapi::GetLastError;
-use winapi::um::libloaderapi::{GetModuleHandleW, LoadLibraryW, GetProcAddress};
+use winapi::um::libloaderapi::{GetModuleHandleW, GetProcAddress, LoadLibraryW};
 use winapi::um::wingdi::*;
 use winapi::um::winuser::*;
 
@@ -351,12 +351,17 @@ unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) 
 
                         // First, check trajectory for fast movements
                         if let Some(last) = last_pos {
-                            if let Some(safe_pos) = check_movement_path(&last, &current_pos, &state.barrier_rect, &buffer_rect) {
+                            if let Some(safe_pos) = check_movement_path(
+                                &last,
+                                &current_pos,
+                                &state.barrier_rect,
+                                &buffer_rect,
+                            ) {
                                 // Movement would pass through barrier, stop at safe position
                                 SetCursorPos(safe_pos.x, safe_pos.y);
                                 return 1;
                             }
-                            
+
                             // Predictive positioning - check where cursor is heading
                             let dx = current_pos.x - last.x;
                             let dy = current_pos.y - last.y;
@@ -364,12 +369,17 @@ unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) 
                                 x: current_pos.x + dx,
                                 y: current_pos.y + dy,
                             };
-                            
+
                             // If predicted position would be in barrier, stop now
                             if point_in_rect(&predicted_pos, &state.barrier_rect) {
                                 // Find a safe position just outside the buffer
-                                let push_factor = calculate_dynamic_push_factor(state.push_factor, &last, &current_pos);
-                                let safe_pos = push_point_out_of_rect(&current_pos, &buffer_rect, push_factor);
+                                let push_factor = calculate_dynamic_push_factor(
+                                    state.push_factor,
+                                    &last,
+                                    &current_pos,
+                                );
+                                let safe_pos =
+                                    push_point_out_of_rect(&current_pos, &buffer_rect, push_factor);
                                 SetCursorPos(safe_pos.x, safe_pos.y);
                                 return 1;
                             }
@@ -377,7 +387,7 @@ unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) 
 
                         if point_in_rect(&current_pos, &state.barrier_rect) {
                             warn!(x = current_pos.x, y = current_pos.y, "Cursor in barrier!");
-                            
+
                             // Play barrier entry sound if this is the first time
                             if !HAS_ENTERED_BARRIER.load(Ordering::Acquire) {
                                 HAS_ENTERED_BARRIER.store(true, Ordering::Release);
@@ -395,7 +405,7 @@ unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) 
 
                         if in_buffer != was_in_buffer {
                             LAST_IN_BARRIER.store(in_buffer, Ordering::Release);
-                            
+
                             // Play barrier hit sound when entering buffer zone
                             if in_buffer {
                                 if let Some(ref sound_path) = state.on_barrier_hit_sound {
@@ -407,16 +417,17 @@ unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) 
                         if in_buffer {
                             // Calculate dynamic push factor based on movement speed
                             let push_factor = if let Some(last) = last_pos {
-                                calculate_dynamic_push_factor(state.push_factor, &last, &current_pos)
+                                calculate_dynamic_push_factor(
+                                    state.push_factor,
+                                    &last,
+                                    &current_pos,
+                                )
                             } else {
                                 state.push_factor
                             };
 
-                            let new_pos = push_point_out_of_rect(
-                                &current_pos,
-                                &buffer_rect,
-                                push_factor,
-                            );
+                            let new_pos =
+                                push_point_out_of_rect(&current_pos, &buffer_rect, push_factor);
 
                             SetCursorPos(new_pos.x, new_pos.y);
 
@@ -566,7 +577,7 @@ fn play_sound_async(sound_path: &str) {
             // Cast to function pointer and call
             type PlaySoundWFn = unsafe extern "system" fn(*const u16, HMODULE, u32) -> i32;
             let playsound_fn: PlaySoundWFn = std::mem::transmute(playsound_proc);
-            
+
             let wide_path: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
             // SND_FILENAME = 0x00020000, SND_ASYNC = 0x0001, SND_NODEFAULT = 0x0002
             playsound_fn(
@@ -585,7 +596,7 @@ fn check_movement_path(start: &POINT, end: &POINT, barrier: &RECT, buffer: &RECT
     if dx.abs() < 2 && dy.abs() < 2 {
         return None;
     }
-    
+
     // Check multiple points along the movement path
     let steps = 10; // More steps for better accuracy
     for i in 1..=steps {
@@ -594,7 +605,7 @@ fn check_movement_path(start: &POINT, end: &POINT, barrier: &RECT, buffer: &RECT
             x: (start.x as f32 + dx as f32 * t) as i32,
             y: (start.y as f32 + dy as f32 * t) as i32,
         };
-        
+
         // Check if this intermediate point hits the barrier
         if point_in_rect(&check_point, barrier) {
             // Find the last safe point outside the buffer zone
@@ -604,7 +615,7 @@ fn check_movement_path(start: &POINT, end: &POINT, barrier: &RECT, buffer: &RECT
                     x: (start.x as f32 + dx as f32 * safe_t) as i32,
                     y: (start.y as f32 + dy as f32 * safe_t) as i32,
                 };
-                
+
                 if !point_in_rect(&safe_point, buffer) {
                     return Some(safe_point);
                 }
@@ -620,7 +631,7 @@ fn calculate_dynamic_push_factor(base_factor: i32, last_pos: &POINT, current_pos
     let dx = (current_pos.x - last_pos.x) as f64;
     let dy = (current_pos.y - last_pos.y) as f64;
     let speed = (dx * dx + dy * dy).sqrt();
-    
+
     // Scale push factor: faster movement = larger push
     // Speed 10 = 1x, Speed 50 = 2x, Speed 100+ = 3x
     let multiplier = (speed / 25.0).max(1.0).min(3.0);

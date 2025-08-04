@@ -101,7 +101,34 @@ cargo clippy
 
 # Check compilation
 cargo check
+
+# Run tests
+cargo test
 ```
+
+## Development Workflow
+
+**IMPORTANT**: After completing any requested code change, always run this full verification sequence:
+
+```bash
+# 1. Run linter to catch code issues
+cargo clippy
+
+# 2. Format code consistently
+cargo fmt
+
+# 3. Run all tests to ensure functionality
+cargo test
+
+# 4. Deploy to verify the complete build process
+make deploy
+```
+
+This ensures:
+- Code follows Rust best practices (`clippy`)
+- Consistent formatting across the codebase (`fmt`)
+- All functionality works as expected (`test`)
+- The complete build and deployment pipeline works (`deploy`)
 
 ## Configuration System
 
