@@ -166,17 +166,20 @@ This ensures:
 The project includes GitHub Actions workflows for automated quality assurance:
 
 **Unit Tests Workflow** (`.github/workflows/tests.yml`):
-- Runs on every push and pull request to main/develop branches
+- Runs on push/pull request to main/develop branches (skips documentation-only changes)
 - Executes all 79+ unit tests in both debug and release modes
 - Generates test coverage reports and uploads results as artifacts
 - Uses Windows runners to match the target platform
 
 **Code Quality Workflow** (`.github/workflows/code-quality.yml`):
+- Runs on push/pull request to main/develop branches (skips documentation-only changes)
 - Enforces code formatting with `cargo fmt --check`
 - Runs clippy lints with warnings treated as errors (`-D warnings`)
 - Verifies compilation in both debug and release modes
 - Validates project structure and required files
 - Caches dependencies for faster builds
+
+**CI Optimization**: Both workflows use `paths-ignore` to skip running when only documentation files (*.md, *.txt, docs/, LICENSE) are changed, saving CI resources.
 
 Both workflows must pass before merging changes to ensure consistent code quality and functionality.
 
