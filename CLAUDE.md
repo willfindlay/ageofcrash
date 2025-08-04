@@ -57,6 +57,7 @@ ageofcrash/
 ├── README.md              # User documentation
 ├── config.ron             # Default configuration file
 ├── rust-analyzer.toml     # IDE configuration
+├── rust-toolchain.toml    # Rust version pinning for consistency
 ├── ageofcrash-app/        # Main application crate
 │   ├── Cargo.toml
 │   └── src/
@@ -179,7 +180,9 @@ The project includes GitHub Actions workflows for automated quality assurance:
 - Validates project structure and required files
 - Caches dependencies for faster builds
 
-**CI Optimization**: Both workflows use `paths-ignore` to skip running when only documentation files (*.md, *.txt, docs/, LICENSE) are changed, saving CI resources.
+**CI Optimizations**: 
+- Both workflows use `paths-ignore` to skip running when only documentation files (*.md, *.txt, docs/, LICENSE) are changed, saving CI resources
+- Rust toolchain version is managed via `rust-toolchain.toml` to ensure consistency between local development and CI environments
 
 Both workflows must pass before merging changes to ensure consistent code quality and functionality.
 
