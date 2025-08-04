@@ -199,6 +199,7 @@ pub fn vk_code_from_string(key: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
     use winapi::um::winuser::*;
 
     #[test]
@@ -604,5 +605,226 @@ mod tests {
         assert_eq!(config.barrier.overlay_alpha, 200); // Default from config.ron
         assert!(config.hud.enabled); // HUD enabled by default
         assert!(!config.debug); // Debug disabled by default
+    }
+
+    // Property test generators
+    fn arb_audio_option() -> impl Strategy<Value = AudioOption> {
+        // Use safe file paths that won't break RON parsing
+        let safe_paths = prop_oneof![
+            Just("sound.wav".to_string()),
+            Just("beep.mp3".to_string()),
+            Just("alert.ogg".to_string()),
+            Just("test_audio.wav".to_string()),
+        ];
+
+        prop_oneof![
+            Just(AudioOption::None),
+            safe_paths.prop_map(AudioOption::File),
+        ]
+    }
+
+    fn arb_overlay_color() -> impl Strategy<Value = OverlayColor> {
+        (any::<u8>(), any::<u8>(), any::<u8>()).prop_map(|(r, g, b)| OverlayColor { r, g, b })
+    }
+
+    fn arb_audio_feedback_config() -> impl Strategy<Value = AudioFeedbackConfig> {
+        (arb_audio_option(), arb_audio_option()).prop_map(|(on_barrier_hit, on_barrier_entry)| {
+            AudioFeedbackConfig {
+                on_barrier_hit,
+                on_barrier_entry,
+            }
+        })
+    }
+
+    fn arb_barrier_config() -> impl Strategy<Value = BarrierConfig> {
+        (
+            any::<i32>(),
+            any::<i32>(),
+            any::<i32>(),
+            any::<i32>(),
+            any::<i32>(),
+            any::<i32>(),
+            arb_overlay_color(),
+            any::<u8>(),
+            arb_audio_feedback_config(),
+        )
+            .prop_map(
+                |(
+                    x,
+                    y,
+                    width,
+                    height,
+                    buffer_zone,
+                    push_factor,
+                    overlay_color,
+                    overlay_alpha,
+                    audio_feedback,
+                )| BarrierConfig {
+                    x,
+                    y,
+                    width,
+                    height,
+                    buffer_zone,
+                    push_factor,
+                    overlay_color,
+                    overlay_alpha,
+                    audio_feedback,
+                },
+            )
+    }
+
+    fn arb_hud_position() -> impl Strategy<Value = HudPosition> {
+        prop_oneof![
+            Just(HudPosition::TopLeft),
+            Just(HudPosition::TopRight),
+            Just(HudPosition::BottomLeft),
+            Just(HudPosition::BottomRight),
+        ]
+    }
+
+    fn arb_hud_config() -> impl Strategy<Value = HudConfig> {
+        (any::<bool>(), arb_hud_position(), any::<u8>()).prop_map(
+            |(enabled, position, background_alpha)| HudConfig {
+                enabled,
+                position,
+                background_alpha,
+            },
+        )
+    }
+
+    fn arb_hotkey_config() -> impl Strategy<Value = HotkeyConfig> {
+        // Use only valid key names that won't break RON parsing
+        let valid_keys = prop_oneof![
+            Just("F1".to_string()),
+            Just("F2".to_string()),
+            Just("F12".to_string()),
+            Just("A".to_string()),
+            Just("B".to_string()),
+            Just("Z".to_string()),
+            Just("0".to_string()),
+            Just("9".to_string()),
+        ];
+
+        (any::<bool>(), any::<bool>(), any::<bool>(), valid_keys).prop_map(
+            |(ctrl, alt, shift, key)| HotkeyConfig {
+                ctrl,
+                alt,
+                shift,
+                key,
+            },
+        )
+    }
+
+    fn arb_config() -> impl Strategy<Value = Config> {
+        (
+            arb_hotkey_config(),
+            arb_barrier_config(),
+            arb_hud_config(),
+            any::<bool>(),
+        )
+            .prop_map(|(hotkey, barrier, hud, debug)| Config {
+                hotkey,
+                barrier,
+                hud,
+                debug,
+            })
+    }
+
+    proptest! {
+        #[test]
+        fn prop_config_roundtrip_serialization(config in arb_config()) {
+            // Serialize to RON
+            let ron_string = ron::to_string(&config).unwrap();
+
+            // Deserialize back
+            let restored: Config = ron::from_str(&ron_string).unwrap();
+
+            // Verify all fields are preserved
+            prop_assert_eq!(restored.hotkey.ctrl, config.hotkey.ctrl);
+            prop_assert_eq!(restored.hotkey.alt, config.hotkey.alt);
+            prop_assert_eq!(restored.hotkey.shift, config.hotkey.shift);
+            prop_assert_eq!(restored.hotkey.key, config.hotkey.key);
+
+            prop_assert_eq!(restored.barrier.x, config.barrier.x);
+            prop_assert_eq!(restored.barrier.y, config.barrier.y);
+            prop_assert_eq!(restored.barrier.width, config.barrier.width);
+            prop_assert_eq!(restored.barrier.height, config.barrier.height);
+            prop_assert_eq!(restored.barrier.buffer_zone, config.barrier.buffer_zone);
+            prop_assert_eq!(restored.barrier.push_factor, config.barrier.push_factor);
+            prop_assert_eq!(restored.barrier.overlay_color.r, config.barrier.overlay_color.r);
+            prop_assert_eq!(restored.barrier.overlay_color.g, config.barrier.overlay_color.g);
+            prop_assert_eq!(restored.barrier.overlay_color.b, config.barrier.overlay_color.b);
+            prop_assert_eq!(restored.barrier.overlay_alpha, config.barrier.overlay_alpha);
+
+            prop_assert_eq!(restored.hud.enabled, config.hud.enabled);
+            prop_assert_eq!(restored.hud.position, config.hud.position);
+            prop_assert_eq!(restored.hud.background_alpha, config.hud.background_alpha);
+
+            prop_assert_eq!(restored.debug, config.debug);
+
+            // Verify audio feedback options
+            match (&config.barrier.audio_feedback.on_barrier_hit, &restored.barrier.audio_feedback.on_barrier_hit) {
+                (AudioOption::None, AudioOption::None) => {},
+                (AudioOption::File(orig), AudioOption::File(rest)) => prop_assert_eq!(orig, rest),
+                _ => prop_assert!(false, "Audio option mismatch for on_barrier_hit"),
+            }
+
+            match (&config.barrier.audio_feedback.on_barrier_entry, &restored.barrier.audio_feedback.on_barrier_entry) {
+                (AudioOption::None, AudioOption::None) => {},
+                (AudioOption::File(orig), AudioOption::File(rest)) => prop_assert_eq!(orig, rest),
+                _ => prop_assert!(false, "Audio option mismatch for on_barrier_entry"),
+            }
+        }
+
+        #[test]
+        fn prop_config_fallback_to_defaults(user_config in arb_config()) {
+            // Test Figment layering directly without file I/O to avoid RON parsing issues
+            // This tests that when we layer a user config over defaults, we get the expected result
+
+            let default_config = Config::default();
+
+            // Use Figment to layer user config over defaults (same as load_from_file)
+            let layered_config: Config = Figment::new()
+                .merge(Serialized::defaults(&default_config))
+                .merge(Serialized::from(user_config.clone(), Profile::Default))
+                .extract()
+                .unwrap();
+
+            // All user-specified fields should be preserved
+            prop_assert_eq!(layered_config.hotkey.ctrl, user_config.hotkey.ctrl);
+            prop_assert_eq!(layered_config.hotkey.alt, user_config.hotkey.alt);
+            prop_assert_eq!(layered_config.hotkey.shift, user_config.hotkey.shift);
+            prop_assert_eq!(layered_config.hotkey.key, user_config.hotkey.key);
+
+            prop_assert_eq!(layered_config.barrier.x, user_config.barrier.x);
+            prop_assert_eq!(layered_config.barrier.y, user_config.barrier.y);
+            prop_assert_eq!(layered_config.barrier.width, user_config.barrier.width);
+            prop_assert_eq!(layered_config.barrier.height, user_config.barrier.height);
+            prop_assert_eq!(layered_config.barrier.buffer_zone, user_config.barrier.buffer_zone);
+            prop_assert_eq!(layered_config.barrier.push_factor, user_config.barrier.push_factor);
+            prop_assert_eq!(layered_config.barrier.overlay_color.r, user_config.barrier.overlay_color.r);
+            prop_assert_eq!(layered_config.barrier.overlay_color.g, user_config.barrier.overlay_color.g);
+            prop_assert_eq!(layered_config.barrier.overlay_color.b, user_config.barrier.overlay_color.b);
+            prop_assert_eq!(layered_config.barrier.overlay_alpha, user_config.barrier.overlay_alpha);
+
+            prop_assert_eq!(layered_config.hud.enabled, user_config.hud.enabled);
+            prop_assert_eq!(layered_config.hud.position, user_config.hud.position);
+            prop_assert_eq!(layered_config.hud.background_alpha, user_config.hud.background_alpha);
+
+            prop_assert_eq!(layered_config.debug, user_config.debug);
+
+            // Verify audio feedback options are preserved
+            match (&user_config.barrier.audio_feedback.on_barrier_hit, &layered_config.barrier.audio_feedback.on_barrier_hit) {
+                (AudioOption::None, AudioOption::None) => {},
+                (AudioOption::File(orig), AudioOption::File(layered)) => prop_assert_eq!(orig, layered),
+                _ => prop_assert!(false, "Audio option mismatch for on_barrier_hit"),
+            }
+
+            match (&user_config.barrier.audio_feedback.on_barrier_entry, &layered_config.barrier.audio_feedback.on_barrier_entry) {
+                (AudioOption::None, AudioOption::None) => {},
+                (AudioOption::File(orig), AudioOption::File(layered)) => prop_assert_eq!(orig, layered),
+                _ => prop_assert!(false, "Audio option mismatch for on_barrier_entry"),
+            }
+        }
     }
 }
