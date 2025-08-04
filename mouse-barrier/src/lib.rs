@@ -40,6 +40,10 @@ static OVERLAY_WINDOWS: [AtomicPtr<winapi::shared::windef::HWND__>; 4] = [
 static SCREEN_WIDTH: AtomicI32 = AtomicI32::new(0);
 static SCREEN_HEIGHT: AtomicI32 = AtomicI32::new(0);
 
+// Physical screen resolution for coordinate scaling
+static PHYSICAL_SCREEN_WIDTH: AtomicI32 = AtomicI32::new(0);
+static PHYSICAL_SCREEN_HEIGHT: AtomicI32 = AtomicI32::new(0);
+
 // Current overlay color for window painting
 static CURRENT_OVERLAY_COLOR: std::sync::atomic::AtomicU32 =
     std::sync::atomic::AtomicU32::new(0x00FF0000); // Default red
@@ -105,6 +109,28 @@ impl MouseBarrier {
             let height = GetSystemMetrics(SM_CYSCREEN);
             SCREEN_WIDTH.store(width, Ordering::Relaxed);
             SCREEN_HEIGHT.store(height, Ordering::Relaxed);
+            
+            // Cache physical screen resolution for coordinate scaling using EnumDisplaySettings
+            let mut dev_mode: DEVMODEW = std::mem::zeroed();
+            dev_mode.dmSize = std::mem::size_of::<DEVMODEW>() as u16;
+            
+            let physical_width;
+            let physical_height;
+            
+            if EnumDisplaySettingsW(std::ptr::null(), ENUM_CURRENT_SETTINGS, &mut dev_mode) != 0 {
+                physical_width = dev_mode.dmPelsWidth as i32;
+                physical_height = dev_mode.dmPelsHeight as i32;
+            } else {
+                // Fallback to logical screen size if EnumDisplaySettings fails
+                physical_width = width;
+                physical_height = height;
+            }
+            
+            PHYSICAL_SCREEN_WIDTH.store(physical_width, Ordering::Relaxed);
+            PHYSICAL_SCREEN_HEIGHT.store(physical_height, Ordering::Relaxed);
+            
+            info!("Screen metrics initialized - Logical: {}x{}, Physical: {}x{}", 
+                  width, height, physical_width, physical_height);
         }
 
         // Update the global overlay color
@@ -697,9 +723,11 @@ fn push_point_out_of_rect(point: &POINT, rect: &RECT, push_factor: i32) -> POINT
     };
 
     // Convert from physical coordinates to logical coordinates for SetCursorPos
-    // Physical screen: ~3840x2160, Logical screen: varies
-    let scale_x = screen_width as f64 / 3840.0;
-    let scale_y = screen_height as f64 / 2160.0;
+    // Get actual physical screen resolution instead of using hardcoded values
+    let physical_width = PHYSICAL_SCREEN_WIDTH.load(Ordering::Relaxed) as f64;
+    let physical_height = PHYSICAL_SCREEN_HEIGHT.load(Ordering::Relaxed) as f64;
+    let scale_x = screen_width as f64 / physical_width;
+    let scale_y = screen_height as f64 / physical_height;
 
     let logical_x = (new_point.x as f64 * scale_x).round() as i32;
     let logical_y = (new_point.y as f64 * scale_y).round() as i32;
@@ -757,8 +785,10 @@ fn create_overlay_windows() -> Result<Vec<HWND>, String> {
             // Calculate positions for 4 windows
             let screen_width = unsafe { GetSystemMetrics(SM_CXSCREEN) };
             let screen_height = unsafe { GetSystemMetrics(SM_CYSCREEN) };
-            let scale_x = screen_width as f64 / 3840.0;
-            let scale_y = screen_height as f64 / 2160.0;
+            let physical_width = PHYSICAL_SCREEN_WIDTH.load(Ordering::Relaxed) as f64;
+            let physical_height = PHYSICAL_SCREEN_HEIGHT.load(Ordering::Relaxed) as f64;
+            let scale_x = screen_width as f64 / physical_width;
+            let scale_y = screen_height as f64 / physical_height;
 
             let barrier_left = (state.barrier_rect.left as f64 * scale_x).round() as i32;
             let barrier_top = (state.barrier_rect.top as f64 * scale_y).round() as i32;
