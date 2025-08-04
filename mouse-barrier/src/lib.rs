@@ -143,7 +143,7 @@ impl MouseBarrier {
     pub fn disable(&mut self) -> Result<(), String> {
         // Stop middle button monitoring
         MIDDLE_BUTTON_MONITORING.store(false, Ordering::Release);
-        
+
         let state_lock = MOUSE_BARRIER_STATE.get().unwrap();
         if let Some(ref mut state) = *state_lock.lock().unwrap() {
             state.enabled = false;
@@ -328,6 +328,10 @@ unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) 
                             bottom: state.barrier_rect.bottom + state.buffer_zone,
                         };
 
+                        if point_in_rect(&current_pos, &state.barrier_rect) {
+                            warn!(x = current_pos.x, y = current_pos.y, "Cursor in barrier!")
+                        }
+
                         let in_buffer = point_in_rect(&current_pos, &buffer_rect);
                         let was_in_buffer = LAST_IN_BARRIER.load(Ordering::Acquire);
 
@@ -397,7 +401,7 @@ fn install_mouse_hook() -> Result<(), String> {
 
 fn uninstall_mouse_hook() -> Result<(), String> {
     let hook = MOUSE_HOOK_HANDLE.swap(std::ptr::null_mut(), Ordering::AcqRel);
-    
+
     if !hook.is_null() {
         unsafe {
             if UnhookWindowsHookEx(hook) == 0 {
@@ -417,7 +421,7 @@ pub fn process_hook_requests() {
             info!("Uninstalled mouse hook due to middle button press");
         }
     }
-    
+
     // Check for install requests
     if HOOK_INSTALL_REQUESTED.swap(false, Ordering::AcqRel) {
         if let Err(e) = install_mouse_hook() {
@@ -430,11 +434,11 @@ pub fn process_hook_requests() {
 
 fn monitor_middle_button_and_control_hook() {
     let mut last_middle_state = false;
-    
+
     while MIDDLE_BUTTON_MONITORING.load(Ordering::Acquire) {
         unsafe {
             let middle_pressed = GetAsyncKeyState(VK_MBUTTON) & 0x8000u16 as i16 != 0;
-            
+
             // Detect state changes
             if middle_pressed != last_middle_state {
                 if middle_pressed {
@@ -456,7 +460,7 @@ fn monitor_middle_button_and_control_hook() {
                 }
                 last_middle_state = middle_pressed;
             }
-            
+
             MIDDLE_MOUSE_DOWN.store(middle_pressed, Ordering::Relaxed);
         }
         thread::sleep(Duration::from_millis(5)); // 200Hz polling for responsiveness
