@@ -114,21 +114,36 @@ cargo test
 # 1. Run linter to catch code issues
 cargo clippy
 
-# 2. Format code consistently
+# 2. Fix any clippy warnings/errors identified
+# Use cargo clippy --fix when possible, or manually address each issue
+
+# 3. Format code consistently
 cargo fmt
 
-# 3. Run all tests to ensure functionality
+# 4. Run all tests to ensure functionality
 cargo test
 
-# 4. Deploy to verify the complete build process
+# 5. Deploy to verify the complete build process
 make deploy
 ```
 
 This ensures:
-- Code follows Rust best practices (`clippy`)
+- Code follows Rust best practices (`clippy`) with **all lints addressed**
 - Consistent formatting across the codebase (`fmt`)
 - All functionality works as expected (`test`)
 - The complete build and deployment pipeline works (`deploy`)
+
+**Note**: Never leave clippy warnings unaddressed. Fix all lints before proceeding to the next step.
+
+### Clippy Lint Guidelines
+
+When fixing clippy lints, follow these patterns:
+
+- **Type complexity**: Extract complex types into type aliases
+- **Too many arguments**: Use a separate Conf struct for constructs with too many paramters
+- **Manual clamp**: Replace `.max().min()` chains with `.clamp()`
+- **Clone on copy**: Use dereference (`*`) instead of `.clone()` for Copy types
+- **Needless borrow**: Remove unnecessary `&` references
 
 ## Configuration System
 
