@@ -38,7 +38,6 @@ pub struct AudioFeedbackConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
 pub enum AudioOption {
     None,
     File(String), // Path to audio file
@@ -58,7 +57,7 @@ pub struct HudConfig {
     pub background_alpha: u8,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum HudPosition {
     TopLeft,
     TopRight,
@@ -66,61 +65,13 @@ pub enum HudPosition {
     BottomRight,
 }
 
-// This is an ugly work around, but it seems to be the only way to make config-rs work properly with RON enums.
-impl Serialize for HudPosition {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        let s = match self {
-            HudPosition::TopLeft => "TopLeft",
-            HudPosition::TopRight => "TopRight",
-            HudPosition::BottomLeft => "BottomLeft",
-            HudPosition::BottomRight => "BottomRight",
-        };
-        serializer.serialize_str(s)
-    }
-}
-
-// This is an ugly work around, but it seems to be the only way to make config-rs work properly with RON enums.
-impl<'de> Deserialize<'de> for HudPosition {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        match s.as_str() {
-            "TopLeft" => Ok(HudPosition::TopLeft),
-            "TopRight" => Ok(HudPosition::TopRight),
-            "BottomLeft" => Ok(HudPosition::BottomLeft),
-            "BottomRight" => Ok(HudPosition::BottomRight),
-            _ => Err(serde::de::Error::custom(format!(
-                "Unknown HudPosition: {}",
-                s
-            ))),
-        }
-    }
-}
-
-// Embed the default config from config.ron at compile time
-const DEFAULT_CONFIG_STR: &str = include_str!("../../config.ron");
-
 // Parse the default config from config.ron at compile time (embedded) and runtime (parsed)
 static DEFAULT_CONFIG: OnceLock<Config> = OnceLock::new();
 
 fn get_default_config() -> &'static Config {
     DEFAULT_CONFIG.get_or_init(|| {
-        // Use config-rs to parse the embedded default config
-        let settings = config::Config::builder()
-            .add_source(config::File::from_str(
-                DEFAULT_CONFIG_STR,
-                config::FileFormat::Ron,
-            ))
-            .build()
-            .expect("Failed to build default config");
-
-        settings
-            .try_deserialize()
+        const DEFAULT_CONFIG_STR: &str = include_str!("../../config.ron");
+        ron::from_str(DEFAULT_CONFIG_STR)
             .expect("Failed to parse embedded config.ron - config file is invalid")
     })
 }
@@ -135,49 +86,26 @@ impl Config {
     pub fn load_from_file<P: AsRef<std::path::Path>>(
         path: P,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        // Use config-rs for layered loading with defaults as base
-        let settings = config::Config::builder()
-            .add_source(config::File::from_str(
-                DEFAULT_CONFIG_STR,
-                config::FileFormat::Ron,
-            ))
-            .add_source(config::File::from(path.as_ref()).format(config::FileFormat::Ron))
-            .build()?;
-
-        let config: Config = settings.try_deserialize()?;
+        let content = std::fs::read_to_string(path)?;
+        let config: Config = ron::from_str(&content)?;
         Ok(config)
     }
 
     pub fn load_or_create(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        // Check if user config file exists
-        let user_config_exists = std::path::Path::new(path).exists();
-
-        // Build layered configuration using config-rs
-        let mut builder = config::Config::builder();
-
-        // Layer 1: Always load embedded defaults from config.ron
-        builder = builder.add_source(config::File::from_str(
-            DEFAULT_CONFIG_STR,
-            config::FileFormat::Ron,
-        ));
-
-        // Layer 2: User config file (if it exists) - overrides defaults
-        if user_config_exists {
-            builder =
-                builder.add_source(config::File::with_name(path).format(config::FileFormat::Ron));
+        match std::fs::read_to_string(path) {
+            Ok(content) => {
+                // Parse the config file - must be complete and valid
+                let config: Config = ron::from_str(&content)?;
+                Ok(config)
+            }
+            Err(_) => {
+                // Create new default config if file doesn't exist
+                info!("Config file not found. Creating default config at {}", path);
+                let config = Config::default();
+                config.save(path)?;
+                Ok(config)
+            }
         }
-
-        // Build and deserialize the configuration
-        let settings = builder.build()?;
-        let config: Config = settings.try_deserialize()?;
-
-        // Create default config file if it doesn't exist
-        if !user_config_exists {
-            info!("Config file not found. Creating default config at {}", path);
-            config.save(path)?;
-        }
-
-        Ok(config)
     }
 
     pub fn save(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
@@ -271,11 +199,7 @@ mod tests {
 
         // Should be able to serialize and deserialize
         let ron_string = ron::to_string(&config_with_none).unwrap();
-        let settings = config::Config::builder()
-            .add_source(config::File::from_str(&ron_string, config::FileFormat::Ron))
-            .build()
-            .unwrap();
-        let restored: Config = settings.try_deserialize().unwrap();
+        let restored: Config = ron::from_str(&ron_string).unwrap();
 
         match restored.barrier.audio_feedback.on_barrier_hit {
             AudioOption::None => {}
@@ -298,16 +222,16 @@ mod tests {
         ];
 
         for pos in positions {
-            let mut config = Config::default();
-            config.hud.position = pos.clone();
-            dbg!(&config);
+            let config = Config {
+                hud: HudConfig {
+                    position: pos.clone(),
+                    ..Config::default().hud
+                },
+                ..Config::default()
+            };
 
             let ron_string = ron::to_string(&config).unwrap();
-            let settings = config::Config::builder()
-                .add_source(config::File::from_str(&ron_string, config::FileFormat::Ron))
-                .build()
-                .unwrap();
-            let restored: Config = settings.try_deserialize().unwrap();
+            let restored: Config = ron::from_str(&ron_string).unwrap();
 
             // Now we can directly compare since HudPosition has PartialEq
             assert_eq!(restored.hud.position, pos);
@@ -529,11 +453,7 @@ mod tests {
         let ron_string = ron::to_string(&original).unwrap();
 
         // Deserialize back
-        let settings = config::Config::builder()
-            .add_source(config::File::from_str(&ron_string, config::FileFormat::Ron))
-            .build()
-            .unwrap();
-        let restored: Config = settings.try_deserialize().unwrap();
+        let restored: Config = ron::from_str(&ron_string).unwrap();
 
         // Verify key fields are preserved
         assert_eq!(restored.hotkey.ctrl, original.hotkey.ctrl);

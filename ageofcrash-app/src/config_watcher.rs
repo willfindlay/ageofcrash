@@ -170,7 +170,7 @@ mod tests {
     ),
     hud: (
         enabled: true,
-        position: "TopLeft",
+        position: TopLeft,
         background_alpha: 200,
     ),
     debug: false,
@@ -202,7 +202,7 @@ mod tests {
     ),
     hud: (
         enabled: false,
-        position: "BottomRight",
+        position: BottomRight,
         background_alpha: 150,
     ),
     debug: true,
