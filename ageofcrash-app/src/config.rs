@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -63,40 +64,20 @@ pub enum HudPosition {
     BottomRight,
 }
 
+// Parse the default config from config.ron at compile time (embedded) and runtime (parsed)
+static DEFAULT_CONFIG: OnceLock<Config> = OnceLock::new();
+
+fn get_default_config() -> &'static Config {
+    DEFAULT_CONFIG.get_or_init(|| {
+        const DEFAULT_CONFIG_STR: &str = include_str!("../../config.ron");
+        ron::from_str(DEFAULT_CONFIG_STR)
+            .expect("Failed to parse embedded config.ron - config file is invalid")
+    })
+}
+
 impl Default for Config {
     fn default() -> Self {
-        Self {
-            hotkey: HotkeyConfig {
-                ctrl: true,
-                alt: false,
-                shift: false,
-                key: "F12".to_string(),
-            },
-            barrier: BarrierConfig {
-                x: 0,
-                y: 1080, // Bottom edge of screen for 1080p
-                width: 200,
-                height: 40,
-                buffer_zone: 20,
-                push_factor: 50,
-                overlay_color: OverlayColor {
-                    r: 255, // Red
-                    g: 0,   // Green
-                    b: 0,   // Blue
-                },
-                overlay_alpha: 200, // Semi-transparent red
-                audio_feedback: AudioFeedbackConfig {
-                    on_barrier_hit: AudioOption::None,
-                    on_barrier_entry: AudioOption::None,
-                },
-            },
-            hud: HudConfig {
-                enabled: true,
-                position: HudPosition::TopRight,
-                background_alpha: 180, // Semi-transparent
-            },
-            debug: false,
-        }
+        get_default_config().clone()
     }
 }
 
