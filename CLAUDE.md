@@ -1,5 +1,14 @@
 # Age of Crash Mouse Barrier - Development Guide
 
+**CRITICAL**: This file serves as the primary reference for all development work on this project. **Always update CLAUDE.md** when:
+- Making major architectural changes or introducing new features
+- Fixing significant bugs or resolving complex issues
+- Modifying the development workflow, build process, or testing procedures
+- Adding new dependencies, tools, or development practices
+- Discovering important patterns, gotchas, or best practices
+
+Keeping this documentation current ensures future AI assistants and developers have accurate, up-to-date guidance for working with this codebase effectively.
+
 ## Getting Started - READ FIRST
 
 **IMPORTANT**: Before making any code changes, always inspect the project structure to understand the architecture:
