@@ -6,9 +6,10 @@ mod hud;
 use config::{AudioOption, Config};
 use config_watcher::{ConfigEvent, ConfigWatcher};
 use hotkey::HotkeyDetector;
-use hud::Hud;
+use hud::{BarrierStateConfig, Hud};
 use mouse_barrier::{
     process_hook_requests, set_mouse_position_callback, KeyboardHook, MouseBarrier,
+    MouseBarrierConfig,
 };
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -43,28 +44,30 @@ impl AppState {
     }
 
     fn initialize_barrier(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        self.mouse_barrier = Some(MouseBarrier::new(
-            self.config.barrier.x,
-            self.config.barrier.y,
-            self.config.barrier.width,
-            self.config.barrier.height,
-            self.config.barrier.buffer_zone,
-            self.config.barrier.push_factor,
-            (
+        let config = MouseBarrierConfig {
+            x: self.config.barrier.x,
+            y: self.config.barrier.y,
+            width: self.config.barrier.width,
+            height: self.config.barrier.height,
+            buffer_zone: self.config.barrier.buffer_zone,
+            push_factor: self.config.barrier.push_factor,
+            overlay_color: (
                 self.config.barrier.overlay_color.r,
                 self.config.barrier.overlay_color.g,
                 self.config.barrier.overlay_color.b,
             ),
-            self.config.barrier.overlay_alpha,
-            match &self.config.barrier.audio_feedback.on_barrier_hit {
+            overlay_alpha: self.config.barrier.overlay_alpha,
+            on_barrier_hit_sound: match &self.config.barrier.audio_feedback.on_barrier_hit {
                 AudioOption::None => None,
                 AudioOption::File(path) => Some(path.clone()),
             },
-            match &self.config.barrier.audio_feedback.on_barrier_entry {
+            on_barrier_entry_sound: match &self.config.barrier.audio_feedback.on_barrier_entry {
                 AudioOption::None => None,
                 AudioOption::File(path) => Some(path.clone()),
             },
-        ));
+        };
+
+        self.mouse_barrier = Some(MouseBarrier::new(config));
 
         if self.barrier_enabled {
             if let Some(barrier) = &mut self.mouse_barrier {
@@ -119,28 +122,29 @@ impl AppState {
 
         // Update the barrier configuration using the existing global state
         if let Some(barrier) = &mut self.mouse_barrier {
-            barrier.update_barrier(
-                new_config.barrier.x,
-                new_config.barrier.y,
-                new_config.barrier.width,
-                new_config.barrier.height,
-                new_config.barrier.buffer_zone,
-                new_config.barrier.push_factor,
-                (
+            let barrier_config = MouseBarrierConfig {
+                x: new_config.barrier.x,
+                y: new_config.barrier.y,
+                width: new_config.barrier.width,
+                height: new_config.barrier.height,
+                buffer_zone: new_config.barrier.buffer_zone,
+                push_factor: new_config.barrier.push_factor,
+                overlay_color: (
                     new_config.barrier.overlay_color.r,
                     new_config.barrier.overlay_color.g,
                     new_config.barrier.overlay_color.b,
                 ),
-                new_config.barrier.overlay_alpha,
-                match &new_config.barrier.audio_feedback.on_barrier_hit {
+                overlay_alpha: new_config.barrier.overlay_alpha,
+                on_barrier_hit_sound: match &new_config.barrier.audio_feedback.on_barrier_hit {
                     AudioOption::None => None,
                     AudioOption::File(path) => Some(path.clone()),
                 },
-                match &new_config.barrier.audio_feedback.on_barrier_entry {
+                on_barrier_entry_sound: match &new_config.barrier.audio_feedback.on_barrier_entry {
                     AudioOption::None => None,
                     AudioOption::File(path) => Some(path.clone()),
                 },
-            );
+            };
+            barrier.update_barrier(barrier_config);
 
             // If barrier was enabled, toggle it off and back on to refresh overlay windows
             if was_enabled {
@@ -187,15 +191,16 @@ impl AppState {
 
             // Force HUD refresh
             if let Some(hud) = &mut self.hud {
-                if let Err(e) = hud.update_barrier_state(
-                    self.barrier_enabled,
-                    self.config.barrier.x,
-                    self.config.barrier.y,
-                    self.config.barrier.width,
-                    self.config.barrier.height,
-                    self.config.barrier.buffer_zone,
-                    self.config.barrier.push_factor,
-                ) {
+                let barrier_state_config = BarrierStateConfig {
+                    enabled: self.barrier_enabled,
+                    x: self.config.barrier.x,
+                    y: self.config.barrier.y,
+                    width: self.config.barrier.width,
+                    height: self.config.barrier.height,
+                    buffer_zone: self.config.barrier.buffer_zone,
+                    push_factor: self.config.barrier.push_factor,
+                };
+                if let Err(e) = hud.update_barrier_state(barrier_state_config) {
                     warn!("Failed to update HUD barrier state: {}", e);
                 }
             }

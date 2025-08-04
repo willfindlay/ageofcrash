@@ -12,11 +12,12 @@ use winapi::um::libloaderapi::{GetModuleHandleW, GetProcAddress, LoadLibraryW};
 use winapi::um::wingdi::*;
 use winapi::um::winuser::*;
 
+type KeyboardCallback = Arc<Mutex<Option<Box<dyn Fn(u32, bool) + Send + Sync>>>>;
+type MousePositionCallback = Arc<Mutex<Option<Box<dyn Fn(i32, i32) + Send + Sync>>>>;
+
 static MOUSE_BARRIER_STATE: OnceLock<Arc<Mutex<Option<MouseBarrierState>>>> = OnceLock::new();
-static KEYBOARD_CALLBACK: OnceLock<Arc<Mutex<Option<Box<dyn Fn(u32, bool) + Send + Sync>>>>> =
-    OnceLock::new();
-static MOUSE_POSITION_CALLBACK: OnceLock<Arc<Mutex<Option<Box<dyn Fn(i32, i32) + Send + Sync>>>>> =
-    OnceLock::new();
+static KEYBOARD_CALLBACK: OnceLock<KeyboardCallback> = OnceLock::new();
+static MOUSE_POSITION_CALLBACK: OnceLock<MousePositionCallback> = OnceLock::new();
 static KEYBOARD_HOOK_HANDLE: AtomicPtr<winapi::shared::windef::HHOOK__> =
     AtomicPtr::new(std::ptr::null_mut());
 static MOUSE_HOOK_HANDLE: AtomicPtr<winapi::shared::windef::HHOOK__> =
@@ -55,42 +56,44 @@ struct MouseBarrierState {
     on_barrier_entry_sound: Option<String>,
 }
 
+pub struct MouseBarrierConfig {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+    pub buffer_zone: i32,
+    pub push_factor: i32,
+    pub overlay_color: (u8, u8, u8),
+    pub overlay_alpha: u8,
+    pub on_barrier_hit_sound: Option<String>,
+    pub on_barrier_entry_sound: Option<String>,
+}
+
 pub struct MouseBarrier;
 
 pub struct KeyboardHook;
 
 impl MouseBarrier {
-    pub fn new(
-        x: i32,
-        y: i32,
-        width: i32,
-        height: i32,
-        buffer_zone: i32,
-        push_factor: i32,
-        overlay_color: (u8, u8, u8),
-        overlay_alpha: u8,
-        on_barrier_hit_sound: Option<String>,
-        on_barrier_entry_sound: Option<String>,
-    ) -> Self {
+    pub fn new(config: MouseBarrierConfig) -> Self {
         // Convert from bottom-left origin to Windows top-left origin
         let barrier_rect = RECT {
-            left: x,
-            top: y - height,  // y is bottom, so top = y - height
-            right: x + width, // right extends from left
-            bottom: y,        // bottom is the y coordinate
+            left: config.x,
+            top: config.y - config.height, // y is bottom, so top = y - height
+            right: config.x + config.width, // right extends from left
+            bottom: config.y,              // bottom is the y coordinate
         };
 
         let state = MouseBarrierState {
             barrier_rect,
-            buffer_zone,
-            push_factor,
+            buffer_zone: config.buffer_zone,
+            push_factor: config.push_factor,
             enabled: false,
-            overlay_color: ((overlay_color.0 as u32) << 16)
-                | ((overlay_color.1 as u32) << 8)
-                | (overlay_color.2 as u32),
-            overlay_alpha,
-            on_barrier_hit_sound,
-            on_barrier_entry_sound,
+            overlay_color: ((config.overlay_color.0 as u32) << 16)
+                | ((config.overlay_color.1 as u32) << 8)
+                | (config.overlay_color.2 as u32),
+            overlay_alpha: config.overlay_alpha,
+            on_barrier_hit_sound: config.on_barrier_hit_sound,
+            on_barrier_entry_sound: config.on_barrier_entry_sound,
         };
 
         let state_lock = MOUSE_BARRIER_STATE.get_or_init(|| Arc::new(Mutex::new(None)));
@@ -193,36 +196,24 @@ impl MouseBarrier {
         }
     }
 
-    pub fn update_barrier(
-        &mut self,
-        x: i32,
-        y: i32,
-        width: i32,
-        height: i32,
-        buffer_zone: i32,
-        push_factor: i32,
-        overlay_color: (u8, u8, u8),
-        overlay_alpha: u8,
-        on_barrier_hit_sound: Option<String>,
-        on_barrier_entry_sound: Option<String>,
-    ) {
+    pub fn update_barrier(&mut self, config: MouseBarrierConfig) {
         let state_lock = MOUSE_BARRIER_STATE.get().unwrap();
         if let Some(ref mut state) = *state_lock.lock().unwrap() {
             // Convert from bottom-left origin to Windows top-left origin
             state.barrier_rect = RECT {
-                left: x,
-                top: y - height,  // y is bottom, so top = y - height
-                right: x + width, // right extends from left
-                bottom: y,        // bottom is the y coordinate
+                left: config.x,
+                top: config.y - config.height, // y is bottom, so top = y - height
+                right: config.x + config.width, // right extends from left
+                bottom: config.y,              // bottom is the y coordinate
             };
-            state.buffer_zone = buffer_zone;
-            state.push_factor = push_factor;
-            state.overlay_color = ((overlay_color.0 as u32) << 16)
-                | ((overlay_color.1 as u32) << 8)
-                | (overlay_color.2 as u32);
-            state.overlay_alpha = overlay_alpha;
-            state.on_barrier_hit_sound = on_barrier_hit_sound;
-            state.on_barrier_entry_sound = on_barrier_entry_sound;
+            state.buffer_zone = config.buffer_zone;
+            state.push_factor = config.push_factor;
+            state.overlay_color = ((config.overlay_color.0 as u32) << 16)
+                | ((config.overlay_color.1 as u32) << 8)
+                | (config.overlay_color.2 as u32);
+            state.overlay_alpha = config.overlay_alpha;
+            state.on_barrier_hit_sound = config.on_barrier_hit_sound;
+            state.on_barrier_entry_sound = config.on_barrier_entry_sound;
 
             // Update the global overlay color
             CURRENT_OVERLAY_COLOR.store(state.overlay_color, Ordering::Relaxed);
@@ -334,7 +325,7 @@ unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) 
                     if state.enabled {
                         // Get last mouse position for trajectory checking
                         let last_pos = if let Ok(mut last_pos_guard) = LAST_MOUSE_POS.lock() {
-                            let last = last_pos_guard.clone();
+                            let last = *last_pos_guard;
                             *last_pos_guard = Some(current_pos);
                             last
                         } else {
@@ -634,7 +625,7 @@ fn calculate_dynamic_push_factor(base_factor: i32, last_pos: &POINT, current_pos
 
     // Scale push factor: faster movement = larger push
     // Speed 10 = 1x, Speed 50 = 2x, Speed 100+ = 3x
-    let multiplier = (speed / 25.0).max(1.0).min(3.0);
+    let multiplier = (speed / 25.0).clamp(1.0, 3.0);
     (base_factor as f64 * multiplier) as i32
 }
 

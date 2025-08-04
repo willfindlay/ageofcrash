@@ -1,5 +1,15 @@
 use crate::config::{HudConfig, HudPosition};
 use std::ffi::OsStr;
+
+pub struct BarrierStateConfig {
+    pub enabled: bool,
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+    pub buffer_zone: i32,
+    pub push_factor: i32,
+}
 use std::os::windows::ffi::OsStrExt;
 use std::ptr;
 use winapi::shared::minwindef::*;
@@ -103,21 +113,15 @@ impl Hud {
 
     pub fn update_barrier_state(
         &mut self,
-        enabled: bool,
-        x: i32,
-        y: i32,
-        width: i32,
-        height: i32,
-        buffer_zone: i32,
-        push_factor: i32,
+        config: BarrierStateConfig,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        self.barrier_enabled = enabled;
-        self.barrier_x = x;
-        self.barrier_y = y;
-        self.barrier_width = width;
-        self.barrier_height = height;
-        self.buffer_zone = buffer_zone;
-        self.push_factor = push_factor;
+        self.barrier_enabled = config.enabled;
+        self.barrier_x = config.x;
+        self.barrier_y = config.y;
+        self.barrier_width = config.width;
+        self.barrier_height = config.height;
+        self.buffer_zone = config.buffer_zone;
+        self.push_factor = config.push_factor;
 
         if self.enabled {
             self.refresh_display()?;
@@ -285,11 +289,11 @@ unsafe extern "system" fn hud_window_proc(
                 0,
                 0,
                 0,
-                DEFAULT_CHARSET as u32,
-                OUT_DEFAULT_PRECIS as u32,
-                CLIP_DEFAULT_PRECIS as u32,
-                DEFAULT_QUALITY as u32,
-                DEFAULT_PITCH as u32 | FF_DONTCARE as u32,
+                DEFAULT_CHARSET,
+                OUT_DEFAULT_PRECIS,
+                CLIP_DEFAULT_PRECIS,
+                DEFAULT_QUALITY,
+                DEFAULT_PITCH | FF_DONTCARE,
                 ptr::null(),
             );
 

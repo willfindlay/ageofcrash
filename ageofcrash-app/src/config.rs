@@ -163,7 +163,7 @@ impl Config {
         let mut default_json = serde_json::to_value(&default_config)?;
 
         // Try to parse user config as RON and convert to JSON for merging
-        if let Ok(user_ron) = ron::from_str::<ron::Value>(&existing_content) {
+        if let Ok(user_ron) = ron::from_str::<ron::Value>(existing_content) {
             // Convert RON to JSON string then parse as JSON
             let ron_as_json_str = ron::to_string(&user_ron)?;
             if let Ok(user_json) = serde_json::from_str::<serde_json::Value>(&ron_as_json_str) {
@@ -268,28 +268,36 @@ mod tests {
     #[test]
     fn test_default_config_can_be_created() {
         let config = Config::default();
-        assert_eq!(config.hotkey.ctrl, true);
+        assert!(config.hotkey.ctrl);
         assert_eq!(config.hotkey.key, "F12");
-        assert_eq!(config.debug, false);
+        assert!(!config.debug);
     }
 
     #[test]
     fn test_merge_configs_preserves_user_settings() {
         let default = Config::default();
-        let mut user = Config::default();
-        user.debug = true;
-        user.hotkey.key = "F1".to_string();
-        user.barrier.width = 500;
+        let user = Config {
+            debug: true,
+            hotkey: crate::config::HotkeyConfig {
+                key: "F1".to_string(),
+                ..Config::default().hotkey
+            },
+            barrier: crate::config::BarrierConfig {
+                width: 500,
+                ..Config::default().barrier
+            },
+            ..Config::default()
+        };
 
         let merged = Config::merge_configs(&default, &user).unwrap();
 
         // User settings should be preserved
-        assert_eq!(merged.debug, true);
+        assert!(merged.debug);
         assert_eq!(merged.hotkey.key, "F1");
         assert_eq!(merged.barrier.width, 500);
 
         // Other default settings should remain
-        assert_eq!(merged.hotkey.ctrl, true);
+        assert!(merged.hotkey.ctrl);
         assert_eq!(merged.barrier.height, default.barrier.height);
     }
 
@@ -317,7 +325,7 @@ mod tests {
         let merged_config: Config = serde_json::from_value(merged_json).unwrap();
 
         // User settings should be preserved
-        assert_eq!(merged_config.hotkey.ctrl, false);
+        assert!(!merged_config.hotkey.ctrl);
         assert_eq!(merged_config.hotkey.key, "F2");
         assert_eq!(merged_config.barrier.x, 100);
 
@@ -342,9 +350,9 @@ mod tests {
         let merged = Config::merge_with_defaults(partial_ron).unwrap();
 
         // User settings should be preserved
-        assert_eq!(merged.hotkey.ctrl, false);
+        assert!(!merged.hotkey.ctrl);
         assert_eq!(merged.hotkey.key, "F5");
-        assert_eq!(merged.debug, true);
+        assert!(merged.debug);
 
         // Missing fields should come from defaults
         let default = Config::default();
