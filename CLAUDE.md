@@ -116,11 +116,11 @@ make deploy-c
 ### Code Quality
 
 ```bash
-# Format code
-cargo fmt
+# Format code (all packages)
+cargo fmt --all
 
-# Run linter
-cargo clippy
+# Run linter (with all targets and features)
+cargo clippy --all-targets --all-features
 
 # Check compilation
 cargo check
@@ -151,14 +151,14 @@ The current test suite includes 79+ comprehensive unit tests covering:
 **MANDATORY**: After making ANY code change, no matter how small, you MUST run:
 
 ```bash
-# 1. Run linter to catch code issues
-cargo clippy
+# 1. Run linter to catch code issues (exact CI command)
+cargo clippy --all-targets --all-features -- -D warnings
 
 # 2. Fix any clippy warnings/errors identified
 # Use cargo clippy --fix when possible, or manually address each issue
 
-# 3. Format code consistently
-cargo fmt
+# 3. Format code consistently (all packages)
+cargo fmt --all
 ```
 
 **BEFORE COMMITTING**: The above checks are ABSOLUTELY REQUIRED. Additionally run:
@@ -178,10 +178,11 @@ This ensures:
 - The complete build and deployment pipeline works (`deploy`)
 
 **CRITICAL REMINDERS**:
-- **NEVER commit without running `cargo clippy` and `cargo fmt`** - CI will fail if you do
+- **NEVER commit without running `cargo clippy --all-targets --all-features -- -D warnings` and `cargo fmt`** - CI will fail if you do
 - **NEVER ignore clippy warnings** - fix ALL lints before proceeding
 - **Run these checks after EVERY change** - even small ones like removing a function or dependency
 - **The order matters**: Run clippy first to fix issues, then fmt to ensure consistent formatting
+- **Use exact CI command**: `--all-targets --all-features -- -D warnings` checks all code including tests and examples
 
 ### Continuous Integration
 
