@@ -913,7 +913,7 @@ mod tests {
             let mut figment = Figment::new().merge(Serialized::defaults(&default_config));
 
             // Only merge if we have any user overrides
-            if user_config_value.as_object().unwrap().len() > 0 {
+            if !user_config_value.as_object().unwrap().is_empty() {
                 figment = figment.merge(Serialized::from(user_config_value, Profile::Default));
             }
 
