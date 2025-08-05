@@ -146,6 +146,28 @@ The current test suite includes 79+ comprehensive unit tests covering:
 - File watching and configuration reloading
 - Error handling and edge cases
 
+### Git Branching Strategy
+
+**CRITICAL**: Always create a new branch for each feature or fix unless you are already in the middle of working on a feature and have created a branch.
+
+**Branch Naming Convention**: 
+- Use the format: `pr/[terse-name]`
+- `terse-name` should accurately represent what you are working on
+- Use lowercase words separated by hyphens (`-`)
+- Keep branch names concise but descriptive
+
+**Examples**:
+- `pr/add-audio-alerts` - Adding audio alert functionality
+- `pr/fix-dpi-scaling` - Fixing DPI scaling issues
+- `pr/update-config-schema` - Updating configuration schema
+- `pr/refactor-hook-logic` - Refactoring Windows hook implementation
+
+**Workflow**:
+1. Before starting new work, create a branch: `git checkout -b pr/feature-name`
+2. Make your changes and commits on this branch
+3. Push the branch and create a pull request when ready
+4. Never commit directly to `main` unless fixing critical issues
+
 ### CRITICAL: Code Quality Checks After EVERY Change
 
 **MANDATORY**: After making ANY code change, no matter how small, you MUST run:
