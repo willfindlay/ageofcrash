@@ -323,21 +323,16 @@ of real credentials. For instance, use `api_key: "example_key_123"` or
 #### Commit Sign-off (REQUIRED for Claude Code)
 
 **IMPORTANT**: All commits must be signed off with the human coder's 
-information from git config. Before making your first commit, run:
+information from git config. Always use the `-s` flag with `git commit`:
 
 ```bash
-git config --get user.name
-git config --get user.email
+git commit -s -m "commit message"
 ```
 
-Then include this footer in all commit messages:
-
-```
-Signed-off-by: [Name] <[email]>
-```
-
-This acknowledges that the human developer supervised and approved the
-AI-generated changes according to project contribution guidelines.
+The `-s` flag automatically adds the `Signed-off-by` line using the name
+and email from your git configuration. This acknowledges that the human 
+developer supervised and approved the AI-generated changes according to 
+project contribution guidelines.
 
 #### Example Commit Messages
 
